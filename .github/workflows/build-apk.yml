@@ -1,4 +1,4 @@
-name: Build Signed Release APK (HANA EL Quran v5.1)
+name: Build Signed Release APK (HANA EL Quran v5.2)
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Clean Old Files & Generate v5.1 Project
+      - name: Clean Old Files & Generate v5.2 Project
         run: |
           rm -rf app/src/main/java
           rm -rf app/build
@@ -162,8 +162,8 @@ jobs:
                   applicationId = "alhana.quran"
                   minSdk = 24
                   targetSdk = 34
-                  versionCode = 8
-                  versionName = "5.1"
+                  versionCode = 9
+                  versionName = "5.2"
                   resourceConfigurations += setOf("ar", "en")
               }
 
@@ -497,14 +497,14 @@ jobs:
 
                           if (selectedUrl == "RAW_BUILTIN" && resId != 0) {
                               val afd = resources.openRawResourceFd(resId)
-                              mp = MediaPlayer().apply {
-                                  setAudioAttributes(attrs)
-                                  setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
-                                  afd.close()
-                                  prepare()
-                                  setOnCompletionListener { stopSelf() }
-                                  start()
-                              }
+                              val player = MediaPlayer()
+                              player.setAudioAttributes(attrs)
+                              player.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                              afd.close()
+                              player.prepare()
+                              player.setOnCompletionListener { stopSelf() }
+                              player.start()
+                              mp = player
                               return@Thread
                           }
 
@@ -519,32 +519,32 @@ jobs:
                           }
 
                           if (cached.exists() && cached.length() > 20000) {
-                              mp = MediaPlayer().apply {
-                                  setAudioAttributes(attrs)
-                                  setDataSource(cached.absolutePath)
-                                  prepare()
-                                  setOnCompletionListener { stopSelf() }
-                                  start()
-                              }
+                              val player = MediaPlayer()
+                              player.setAudioAttributes(attrs)
+                              player.setDataSource(cached.absolutePath)
+                              player.prepare()
+                              player.setOnCompletionListener { stopSelf() }
+                              player.start()
+                              mp = player
                           } else if (resId != 0) {
                               val afd = resources.openRawResourceFd(resId)
-                              mp = MediaPlayer().apply {
-                                  setAudioAttributes(attrs)
-                                  setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
-                                  afd.close()
-                                  prepare()
-                                  setOnCompletionListener { stopSelf() }
-                                  start()
-                              }
+                              val player = MediaPlayer()
+                              player.setAudioAttributes(attrs)
+                              player.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                              afd.close()
+                              player.prepare()
+                              player.setOnCompletionListener { stopSelf() }
+                              player.start()
+                              mp = player
                           } else {
                               val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                              mp = MediaPlayer().apply {
-                                  setAudioAttributes(attrs)
-                                  setDataSource(applicationContext, uri)
-                                  prepare()
-                                  setOnCompletionListener { stopSelf() }
-                                  start()
-                              }
+                              val player = MediaPlayer()
+                              player.setAudioAttributes(attrs)
+                              player.setDataSource(applicationContext, uri)
+                              player.prepare()
+                              player.setOnCompletionListener { stopSelf() }
+                              player.start()
+                              mp = player
                           }
                       } catch (_: Exception) {
                           stopSelf()
@@ -563,7 +563,7 @@ jobs:
           }
           EOF
 
-          # 14. خدمة الوسائط للقرآن والراديو في الخلفية (مع الاستيراد الصحيح لـ mutableStateOf)
+          # 14. خدمة الوسائط للقرآن والراديو في الخلفية (بدون تداخل في Scope)
           cat << 'EOF' > app/src/main/java/com/hona/alquran/service/MediaPlaybackService.kt
           package com.hona.alquran.service
 
@@ -575,18 +575,19 @@ jobs:
           import android.os.Build
           import android.os.IBinder
           import android.os.PowerManager
+          import androidx.compose.runtime.MutableState
           import androidx.compose.runtime.mutableStateOf
           import androidx.core.app.NotificationCompat
           import com.hona.alquran.MainActivity
 
-          class MediaPlaybackService : Service() {
-              companion object {
-                  var currentTitle = mutableStateOf<String?>(null)
-                  var currentUrl = mutableStateOf<String?>(null)
-                  var isPlaying = mutableStateOf(false)
-                  var isBuffering = mutableStateOf(false)
-              }
+          object MediaPlaybackState {
+              val currentTitle: MutableState<String?> = mutableStateOf(null)
+              val currentUrl: MutableState<String?> = mutableStateOf(null)
+              val isPlaying: MutableState<Boolean> = mutableStateOf(false)
+              val isBuffering: MutableState<Boolean> = mutableStateOf(false)
+          }
 
+          class MediaPlaybackService : Service() {
               private var mp: MediaPlayer? = null
               private var wl: PowerManager.WakeLock? = null
               private val channelId = "hana_media_playback"
@@ -616,38 +617,38 @@ jobs:
                       val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
                       wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Hana::MediaWakeLock").apply { acquire(3 * 60 * 60 * 1000L) }
                   }
-                  currentTitle.value = titleText
-                  currentUrl.value = url
-                  isBuffering.value = true
-                  isPlaying.value = false
+                  MediaPlaybackState.currentTitle.value = titleText
+                  MediaPlaybackState.currentUrl.value = url
+                  MediaPlaybackState.isBuffering.value = true
+                  MediaPlaybackState.isPlaying.value = false
                   updateNotification("جاري التحميل والتشغيل...")
 
                   Thread {
                       try {
                           mp?.release()
-                          mp = MediaPlayer().apply {
-                              setAudioAttributes(
-                                  AudioAttributes.Builder()
-                                      .setUsage(AudioAttributes.USAGE_MEDIA)
-                                      .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                                      .build()
-                              )
-                              setDataSource(url)
-                              setOnPreparedListener {
-                                  isBuffering.value = false
-                                  isPlaying.value = true
-                                  it.start()
-                                  updateNotification(subtitleText)
-                              }
-                              setOnCompletionListener {
-                                  stopPlayback()
-                              }
-                              setOnErrorListener { _, _, _ ->
-                                  stopPlayback()
-                                  true
-                              }
-                              prepareAsync()
+                          val player = MediaPlayer()
+                          player.setAudioAttributes(
+                              AudioAttributes.Builder()
+                                  .setUsage(AudioAttributes.USAGE_MEDIA)
+                                  .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                                  .build()
+                          )
+                          player.setDataSource(url)
+                          player.setOnPreparedListener { preparedPlayer ->
+                              MediaPlaybackState.isBuffering.value = false
+                              MediaPlaybackState.isPlaying.value = true
+                              preparedPlayer.start()
+                              updateNotification(subtitleText)
                           }
+                          player.setOnCompletionListener {
+                              stopPlayback()
+                          }
+                          player.setOnErrorListener { _, _, _ ->
+                              stopPlayback()
+                              true
+                          }
+                          player.prepareAsync()
+                          mp = player
                       } catch (_: Exception) {
                           stopPlayback()
                       }
@@ -659,21 +660,21 @@ jobs:
                       val player = mp ?: return
                       if (player.isPlaying) {
                           player.pause()
-                          isPlaying.value = false
+                          MediaPlaybackState.isPlaying.value = false
                           updateNotification("متوقف مؤقتاً - $subtitleText")
                       } else {
                           player.start()
-                          isPlaying.value = true
+                          MediaPlaybackState.isPlaying.value = true
                           updateNotification(subtitleText)
                       }
                   } catch (_: Exception) {}
               }
 
               private fun stopPlayback() {
-                  isPlaying.value = false
-                  isBuffering.value = false
-                  currentTitle.value = null
-                  currentUrl.value = null
+                  MediaPlaybackState.isPlaying.value = false
+                  MediaPlaybackState.isBuffering.value = false
+                  MediaPlaybackState.currentTitle.value = null
+                  MediaPlaybackState.currentUrl.value = null
                   try {
                       mp?.stop()
                       mp?.release()
@@ -703,8 +704,10 @@ jobs:
                       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                   )
 
-                  val playPauseIcon = if (isPlaying.value) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
-                  val playPauseLabel = if (isPlaying.value) "إيقاف مؤقت" else "تشغيل"
+                  val playingNow = MediaPlaybackState.isPlaying.value
+                  val bufferingNow = MediaPlaybackState.isBuffering.value
+                  val playPauseIcon = if (playingNow) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+                  val playPauseLabel = if (playingNow) "إيقاف مؤقت" else "تشغيل"
 
                   val notif = NotificationCompat.Builder(this, channelId)
                       .setContentTitle(titleText)
@@ -713,7 +716,7 @@ jobs:
                       .setContentIntent(openPi)
                       .addAction(playPauseIcon, playPauseLabel, togglePi)
                       .addAction(android.R.drawable.ic_delete, "إيقاف", stopPi)
-                      .setOngoing(isPlaying.value || isBuffering.value)
+                      .setOngoing(playingNow || bufferingNow)
                       .build()
 
                   startForeground(2002, notif)
@@ -744,7 +747,7 @@ jobs:
           }
           EOF
 
-          # 15. كود MainActivity.kt (v5.1)
+          # 15. كود MainActivity.kt (v5.2)
           cat << 'EOF' > app/src/main/java/com/hona/alquran/MainActivity.kt
           package com.hona.alquran
 
@@ -796,7 +799,7 @@ jobs:
           import java.text.SimpleDateFormat
           import java.util.*
 
-          const val CURRENT_APP_VERSION = "5.1"
+          const val CURRENT_APP_VERSION = "5.2"
 
           data class SurahInfo(val number: Int, val name: String, val ayahsCount: Int)
           data class AyahWithTafsir(val numberInSurah: Int, val text: String, val tafsir: String)
@@ -1146,10 +1149,10 @@ jobs:
           @Composable
           fun RadioScreen() {
               val context = LocalContext.current
-              val currentUrl by MediaPlaybackService.currentUrl
-              val isPlaying by MediaPlaybackService.isPlaying
-              val isBuffering by MediaPlaybackService.isBuffering
-              val currentTitle by MediaPlaybackService.currentTitle
+              val currentUrl by MediaPlaybackState.currentUrl
+              val isPlaying by MediaPlaybackState.isPlaying
+              val isBuffering by MediaPlaybackState.isBuffering
+              val currentTitle by MediaPlaybackState.currentTitle
 
               LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
                   item {
@@ -1227,8 +1230,8 @@ jobs:
               var tafsir by remember { mutableStateOf(true) }
               var bookmark by remember { mutableIntStateOf(prefs.getInt("bookmark", 1)) }
 
-              val currentUrl by MediaPlaybackService.currentUrl
-              val isPlaying by MediaPlaybackService.isPlaying
+              val currentUrl by MediaPlaybackState.currentUrl
+              val isPlaying by MediaPlaybackState.isPlaying
 
               LaunchedEffect(Unit) {
                   withContext(Dispatchers.IO) {
@@ -1642,7 +1645,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: "هَنَا القُرآن - HANA EL Quran (v5.1)"
+          name: "هَنَا القُرآن - HANA EL Quran (v5.2)"
           files: app/build/outputs/apk/release/alhana.quran.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
