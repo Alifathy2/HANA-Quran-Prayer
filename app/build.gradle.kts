@@ -1,4 +1,3 @@
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -9,7 +8,7 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.hona.alquran"
+        applicationId = "alhana.quran"
         minSdk = 24
         targetSdk = 34
         versionCode = 1
