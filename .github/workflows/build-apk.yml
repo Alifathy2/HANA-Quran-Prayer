@@ -71,7 +71,6 @@ jobs:
           if [ ! -s app/src/main/res/raw/adhan.mp3 ]; then
             curl -L -s "https://www.islamcan.com/audio/adhan/azan1.mp3" -o app/src/main/res/raw/adhan.mp3 || true
           fi
-          # التحقق من أن الملف صوتي سليم وليس صفحة خطأ
           if [ -f app/src/main/res/raw/adhan.mp3 ]; then
             FILE_SIZE=$(stat -c%s "app/src/main/res/raw/adhan.mp3" 2>/dev/null || echo 0)
             if [ "$FILE_SIZE" -lt 15000 ]; then
@@ -135,7 +134,7 @@ jobs:
           </resources>
           EOF
 
-          # 8. إعداد AndroidManifest.xml مع صلاحيات التحديث التلقائي والتليفزيون
+          # 8. إعداد AndroidManifest.xml
           cat << 'EOF' > app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -202,7 +201,7 @@ jobs:
           </manifest>
           EOF
 
-          # 9. كود PrayerCalculator.kt (المواقيت + التاريخ الهجري + الصلاة القادمة)
+          # 9. كود PrayerCalculator.kt
           cat << 'EOF' > app/src/main/java/com/hona/alquran/PrayerCalculator.kt
           package com.hona.alquran
 
@@ -285,7 +284,7 @@ jobs:
                           "رمضان", "شوال", "ذو القعدة", "ذو الحجة"
                       )
                       val monthName = months.getOrElse(month) { "" }
-                      "$day $monthName$year هـ"
+                      "$day $monthName $year هـ"
                   } catch (e: Exception) {
                       ""
                   }
@@ -369,7 +368,7 @@ jobs:
           }
           EOF
 
-          # 12. كود AdhanService.kt (تشغيل الأذان المدمج أو أونلاين مع ضمان عدم التوقف)
+          # 12. كود AdhanService.kt
           cat << 'EOF' > app/src/main/java/com/hona/alquran/service/AdhanService.kt
           package com.hona.alquran.service
 
@@ -450,7 +449,6 @@ jobs:
                           val resId = resources.getIdentifier("adhan", "raw", packageName)
                           val cachedFile = File(filesDir, "cached_adhan.mp3")
 
-                          // إذا لم يغير المستخدم المؤذن وكان ملف raw/adhan موجوداً نشغله فوراً بدون نت
                           if (resId != 0 && !prefs.contains("adhan_url")) {
                               val afd = resources.openRawResourceFd(resId)
                               mediaPlayer = MediaPlayer().apply {
@@ -464,7 +462,6 @@ jobs:
                               return@Thread
                           }
 
-                          // تحميل صوت المؤذن المختار وحفظه محلياً
                           if (!cachedFile.exists() || cachedFile.length() < 15000) {
                               try {
                                   URL(selectedUrl).openStream().use { input ->
@@ -552,7 +549,7 @@ jobs:
           }
           EOF
 
-          # 14. كود MainActivity.kt الشامل (التحديث أونلاين + المواقيت + القرآن الصوتي + الأذكار + السبحة)
+          # 14. كود MainActivity.kt الشامل
           cat << 'EOF' > app/src/main/java/com/hona/alquran/MainActivity.kt
           package com.hona.alquran
 
@@ -711,7 +708,6 @@ jobs:
                   permissionLauncher.launch(perms.toTypedArray())
               }
 
-              // عداد تنازلي حي كل ثانية للصلاة القادمة
               LaunchedEffect(nextPrayer) {
                   while (true) {
                       val np = nextPrayer
@@ -731,7 +727,6 @@ jobs:
               }
 
               if (isWideScreen) {
-                  // تصميم التليفزيون السمارت والتابلت (قائمة جانبية + محتوى عريض)
                   Row(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                       Card(
                           modifier = Modifier.width(230.dp).fillMaxHeight(),
@@ -768,7 +763,6 @@ jobs:
                       }
                   }
               } else {
-                  // تصميم الموبايل المتجاوب
                   Scaffold(
                       topBar = {
                           Row(
@@ -841,4 +835,447 @@ jobs:
                   onClick = onClick,
                   modifier = modifier
                       .onFocusChanged { focused = it.isFocused }
-                      .focus
+                      .focusable()
+                      .border(if (focused) 2.dp else 0.dp, Color.White, RoundedCornerShape(12.dp)),
+                  colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F3A40), contentColor = Color.White),
+                  shape = RoundedCornerShape(12.dp)
+              ) {
+                  Icon(icon, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                  Spacer(Modifier.width(6.dp))
+                  Text(text, fontSize = 13.sp)
+              }
+          }
+
+          @Composable
+          fun PrayerDashboard(prayers: List<PrayerItem>, nextPrayer: PrayerItem?, countdown: String, locationStatus: String) {
+              val todayGregorian = remember { SimpleDateFormat("EEEE، d MMMM yyyy", Locale("ar")).format(Date()) }
+              LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
+                  item {
+                      Card(
+                          modifier = Modifier.fillMaxWidth(),
+                          colors = CardDefaults.cardColors(containerColor = Color(0xFF1B3B42)),
+                          shape = RoundedCornerShape(18.dp)
+                      ) {
+                          Column(modifier = Modifier.padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                              Text("الصلاة القادمة: ${nextPrayer?.name ?: ""}", fontSize = 18.sp, color = Color.LightGray)
+                              Text(countdown, fontSize = 38.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                              Spacer(Modifier.height(6.dp))
+                              Text("$todayGregorian  |  ${PrayerCalculator.getHijriDateString()}", fontSize = 13.sp, color = Color.White)
+                              Text(locationStatus, fontSize = 12.sp, color = Color(0xFFA8DADC))
+                          }
+                      }
+                  }
+
+                  items(prayers) { prayer ->
+                      val isNext = prayer.name == nextPrayer?.name
+                      var focused by remember { mutableStateOf(false) }
+                      Row(
+                          modifier = Modifier
+                              .fillMaxWidth()
+                              .background(if (isNext) Color(0xFF264E56) else MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
+                              .onFocusChanged { focused = it.isFocused }
+                              .focusable()
+                              .border(if (focused || isNext) 2.dp else 0.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(14.dp))
+                              .padding(horizontal = 20.dp, vertical = 16.dp),
+                          horizontalArrangement = Arrangement.SpaceBetween,
+                          verticalAlignment = Alignment.CenterVertically
+                      ) {
+                          Row(verticalAlignment = Alignment.CenterVertically) {
+                              Icon(
+                                  if (prayer.name == "الشروق") Icons.Default.WbSunny else Icons.Default.AccessTime,
+                                  contentDescription = null,
+                                  tint = if (isNext) MaterialTheme.colorScheme.primary else Color.LightGray
+                              )
+                              Spacer(Modifier.width(12.dp))
+                              Text(prayer.name, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                          }
+                          Text(prayer.formattedTime, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                      }
+                  }
+              }
+          }
+
+          @Composable
+          fun QuranScreen() {
+              val context = LocalContext.current
+              val prefs = remember { context.getSharedPreferences("hona_prefs", Context.MODE_PRIVATE) }
+              val scope = rememberCoroutineScope()
+
+              var surahs by remember { mutableStateOf(emptyList<SurahInfo>()) }
+              var searchQuery by remember { mutableStateOf("") }
+              var selectedSurah by remember { mutableStateOf<SurahInfo?>(null) }
+              var ayahs by remember { mutableStateOf(emptyList<AyahWithTafsir>()) }
+              var isLoading by remember { mutableStateOf(true) }
+              var showTafsir by remember { mutableStateOf(true) }
+              var selectedReciter by remember { mutableStateOf(QURAN_RECITERS.first()) }
+              var isPlayingAudio by remember { mutableStateOf(false) }
+              val audioPlayer = remember { MediaPlayer() }
+              var savedBookmarkSurah by remember { mutableIntStateOf(prefs.getInt("bookmark_surah", 1)) }
+
+              DisposableEffect(Unit) {
+                  onDispose {
+                      try { audioPlayer.stop(); audioPlayer.release() } catch (_: Exception) {}
+                  }
+              }
+
+              LaunchedEffect(Unit) {
+                  withContext(Dispatchers.IO) {
+                      try {
+                          val cacheFile = File(context.filesDir, "surahs_cache.json")
+                          val json = if (cacheFile.exists()) cacheFile.readText() else URL("https://api.alquran.cloud/v1/surah").readText().also { cacheFile.writeText(it) }
+                          val data = JSONObject(json).getJSONArray("data")
+                          val list = mutableListOf<SurahInfo>()
+                          for (i in 0 until data.length()) {
+                              val item = data.getJSONObject(i)
+                              list.add(SurahInfo(item.getInt("number"), item.getString("name"), item.getInt("numberOfAyahs")))
+                          }
+                          surahs = list
+                      } catch (_: Exception) {} finally { isLoading = false }
+                  }
+              }
+
+              fun openSurah(surah: SurahInfo) {
+                  selectedSurah = surah
+                  isLoading = true
+                  prefs.edit().putInt("bookmark_surah", surah.number).apply()
+                  savedBookmarkSurah = surah.number
+                  scope.launch(Dispatchers.IO) {
+                      try {
+                          val cacheFile = File(context.filesDir, "surah_${surah.number}.json")
+                          val res = if (cacheFile.exists()) cacheFile.readText() else URL("https://api.alquran.cloud/v1/surah/${surah.number}/editions/quran-uthmani,ar.muyassar").readText().also { cacheFile.writeText(it) }
+                          val editions = JSONObject(res).getJSONArray("data")
+                          val quranAyahs = editions.getJSONObject(0).getJSONArray("ayahs")
+                          val tafsirAyahs = editions.getJSONObject(1).getJSONArray("ayahs")
+                          val combined = mutableListOf<AyahWithTafsir>()
+                          for (i in 0 until quranAyahs.length()) {
+                              combined.add(
+                                  AyahWithTafsir(
+                                      quranAyahs.getJSONObject(i).getInt("numberInSurah"),
+                                      quranAyahs.getJSONObject(i).getString("text"),
+                                      tafsirAyahs.getJSONObject(i).getString("text")
+                                  )
+                              )
+                          }
+                          ayahs = combined
+                      } catch (_: Exception) {} finally { isLoading = false }
+                  }
+              }
+
+              Column(modifier = Modifier.fillMaxSize()) {
+                  if (selectedSurah == null) {
+                      OutlinedTextField(
+                          value = searchQuery,
+                          onValueChange = { searchQuery = it },
+                          placeholder = { Text("ابحث عن اسم السورة...") },
+                          leadingIcon = { Icon(Icons.Default.Search, null) },
+                          modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                          singleLine = true
+                      )
+
+                      val bookmarked = surahs.firstOrNull { it.number == savedBookmarkSurah }
+                      if (bookmarked != null) {
+                          TvButton("استكمال القراءة: ${bookmarked.name}", Icons.Default.Bookmark, Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
+                              openSurah(bookmarked)
+                          }
+                      }
+
+                      if (isLoading) {
+                          Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                      } else {
+                          val filtered = surahs.filter { it.name.contains(searchQuery) || it.number.toString() == searchQuery }
+                          LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                              items(filtered) { surah ->
+                                  var focused by remember { mutableStateOf(false) }
+                                  Row(
+                                      modifier = Modifier
+                                          .fillMaxWidth()
+                                          .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp))
+                                          .onFocusChanged { focused = it.isFocused }
+                                          .focusable()
+                                          .border(if (focused) 2.dp else 0.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
+                                          .clickable { openSurah(surah) }
+                                          .padding(16.dp),
+                                      horizontalArrangement = Arrangement.SpaceBetween
+                                  ) {
+                                      Text("${surah.number}. ${surah.name}", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                      Text("${surah.ayahsCount} آية", color = MaterialTheme.colorScheme.primary)
+                                  }
+                              }
+                          }
+                      }
+                  } else {
+                      Row(
+                          modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                          horizontalArrangement = Arrangement.SpaceBetween,
+                          verticalAlignment = Alignment.CenterVertically
+                      ) {
+                          TvButton("الفهرس", Icons.Default.ArrowBack) {
+                              try { audioPlayer.stop() } catch (_: Exception) {}
+                              isPlayingAudio = false
+                              selectedSurah = null
+                          }
+                          Text(selectedSurah!!.name, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                          Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                              TvButton(if (isPlayingAudio) "إيقاف التلاوة" else "استماع للسورة", if (isPlayingAudio) Icons.Default.Stop else Icons.Default.PlayArrow) {
+                                  if (isPlayingAudio) {
+                                      try { audioPlayer.stop() } catch (_: Exception) {}
+                                      isPlayingAudio = false
+                                  } else {
+                                      val formattedNum = String.format(Locale.US, "%03d", selectedSurah!!.number)
+                                      val audioUrl = "${selectedReciter.serverUrl}/$formattedNum.mp3"
+                                      Toast.makeText(context, "جاري تشغيل تلاوة ${selectedReciter.name}...", Toast.LENGTH_SHORT).show()
+                                      Thread {
+                                          try {
+                                              audioPlayer.reset()
+                                              audioPlayer.setAudioAttributes(AudioAttributes.Builder().setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+                                              audioPlayer.setDataSource(audioUrl)
+                                              audioPlayer.prepare()
+                                              audioPlayer.start()
+                                              isPlayingAudio = true
+                                              audioPlayer.setOnCompletionListener { isPlayingAudio = false }
+                                          } catch (_: Exception) {}
+                                      }.start()
+                                  }
+                              }
+                              TvButton(if (showTafsir) "إخفاء التفسير" else "التفسير", Icons.Default.Description) { showTafsir = !showTafsir }
+                          }
+                      }
+
+                      if (isLoading) {
+                          Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                      } else {
+                          LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                              items(ayahs) { ayah ->
+                                  var focused by remember { mutableStateOf(false) }
+                                  Column(
+                                      modifier = Modifier
+                                          .fillMaxWidth()
+                                          .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
+                                          .onFocusChanged { focused = it.isFocused }
+                                          .focusable()
+                                          .border(if (focused) 2.dp else 0.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(14.dp))
+                                          .padding(16.dp)
+                                  ) {
+                                      Text(
+                                          text = "${ayah.text} ﴿${ayah.numberInSurah}﴾",
+                                          fontSize = 23.sp,
+                                          lineHeight = 38.sp,
+                                          textAlign = TextAlign.Right,
+                                          modifier = Modifier.fillMaxWidth()
+                                      )
+                                      if (showTafsir) {
+                                          HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.3f))
+                                          Text("التفسير الميسر: ${ayah.tafsir}", fontSize = 15.sp, color = Color(0xFFE0E0E0), lineHeight = 25.sp)
+                                      }
+                                  }
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+
+          @Composable
+          fun AzkarAndTasbeehScreen() {
+              val context = LocalContext.current
+              val prefs = remember { context.getSharedPreferences("hona_prefs", Context.MODE_PRIVATE) }
+              var tasbeehCount by remember { mutableIntStateOf(prefs.getInt("tasbeeh_count", 0)) }
+              var selectedCategory by remember { mutableStateOf("أذكار الصباح") }
+              val categories = listOf("أذكار الصباح", "أذكار المساء", "بعد الصلاة", "السبحة الإلكترونية")
+
+              Column(modifier = Modifier.fillMaxSize()) {
+                  Row(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                      categories.forEach { cat ->
+                          TvButton(cat, Icons.Default.Star, Modifier.weight(1f)) { selectedCategory = cat }
+                      }
+                  }
+
+                  if (selectedCategory == "السبحة الإلكترونية") {
+                      Column(
+                          modifier = Modifier.fillMaxSize(),
+                          horizontalAlignment = Alignment.CenterHorizontally,
+                          verticalArrangement = Arrangement.Center
+                      ) {
+                          Text("سبحان الله وبحمده • سبحان الله العظيم", fontSize = 20.sp, color = MaterialTheme.colorScheme.primary)
+                          Spacer(Modifier.height(24.dp))
+                          Box(
+                              modifier = Modifier
+                                  .size(190.dp)
+                                  .background(Color(0xFF1F3A40), CircleShape)
+                                  .border(4.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                                  .clickable {
+                                      tasbeehCount++
+                                      prefs.edit().putInt("tasbeeh_count", tasbeehCount).apply()
+                                  },
+                              contentAlignment = Alignment.Center
+                          ) {
+                              Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                  Text("$tasbeehCount", fontSize = 46.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                  Text("اضغط للتسبيح", fontSize = 14.sp, color = Color.LightGray)
+                              }
+                          }
+                          Spacer(Modifier.height(20.dp))
+                          TvButton("تصفير العداد", Icons.Default.Refresh) {
+                              tasbeehCount = 0
+                              prefs.edit().putInt("tasbeeh_count", 0).apply()
+                          }
+                      }
+                  } else {
+                      val filtered = AZKAR_LIST.filter { it.category == selectedCategory }
+                      LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                          items(filtered) { zikr ->
+                              var count by remember(zikr) { mutableIntStateOf(zikr.targetCount) }
+                              Card(
+                                  modifier = Modifier.fillMaxWidth().clickable { if (count > 0) count-- },
+                                  colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                  shape = RoundedCornerShape(14.dp)
+                              ) {
+                                  Column(modifier = Modifier.padding(16.dp)) {
+                                      Text(zikr.text, fontSize = 19.sp, lineHeight = 32.sp)
+                                      Spacer(Modifier.height(8.dp))
+                                      Text(
+                                          text = if (count > 0) "المتبقي: $count (اضغط للعد)" else "تمت القراءة ✓",
+                                          color = if (count > 0) MaterialTheme.colorScheme.primary else Color(0xFF4CAF50),
+                                          fontWeight = FontWeight.Bold
+                                      )
+                                  }
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+
+          @Composable
+          fun SettingsAndUpdateScreen() {
+              val context = LocalContext.current
+              val prefs = remember { context.getSharedPreferences("hona_prefs", Context.MODE_PRIVATE) }
+              val scope = rememberCoroutineScope()
+              var updateStatus by remember { mutableStateOf("الإصدار الحالي: v2.0 (متصل بمستودع GitHub الخاص بك)") }
+              var selectedAdhanUrl by remember { mutableStateOf(prefs.getString("adhan_url", ADHAN_VOICES.first().second)!!) }
+
+              LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.fillMaxSize()) {
+                  item {
+                      Card(
+                          modifier = Modifier.fillMaxWidth(),
+                          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                          shape = RoundedCornerShape(16.dp)
+                      ) {
+                          Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                              Text("التحديث الهوائي المباشر (Online Update)", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                              Text(updateStatus, fontSize = 14.sp, color = Color.LightGray)
+                              TvButton("تحديث التطبيق أونلاين الآن", Icons.Default.SystemUpdate, Modifier.fillMaxWidth()) {
+                                  updateStatus = "جاري البحث عن أحدث نسخة وتحميلها من GitHub..."
+                                  scope.launch(Dispatchers.IO) {
+                                      try {
+                                          val apkUrl = "https://github.com/Alifathy2/HANA-Quran-Prayer/releases/latest/download/app-debug.apk"
+                                          val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                                          val req = DownloadManager.Request(Uri.parse(apkUrl))
+                                              .setTitle("تحديث تطبيق هنا القرآن")
+                                              .setDescription("جاري تحميل أحدث نسخة...")
+                                              .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                                              .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "Hona-AlQuran-Update.apk")
+                                              .setAllowedOverMetered(true)
+                                          dm.enqueue(req)
+                                          withContext(Dispatchers.Main) {
+                                              updateStatus = "بدأ التحميل في شريط الإشعارات! اضغط على الإشعار عند انتهائه للتثبيت."
+                                              Toast.makeText(context, "جاري تحميل التحديث في الإشعارات...", Toast.LENGTH_LONG).show()
+                                          }
+                                      } catch (e: Exception) {
+                                          withContext(Dispatchers.Main) {
+                                              updateStatus = "تعذر التحميل التلقائي، سيتم فتح رابط التحديث المباشر..."
+                                              context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Alifathy2/HANA-Quran-Prayer/releases/latest")))
+                                          }
+                                      }
+                                  }
+                              }
+                          }
+                      }
+                  }
+
+                  item {
+                      Card(
+                          modifier = Modifier.fillMaxWidth(),
+                          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                          shape = RoundedCornerShape(16.dp)
+                      ) {
+                          Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                              Text("اختيار صوت المؤذن", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                              ADHAN_VOICES.forEach { (name, url) ->
+                                  Row(
+                                      modifier = Modifier.fillMaxWidth().clickable {
+                                          selectedAdhanUrl = url
+                                          prefs.edit().putString("adhan_url", url).apply()
+                                          File(context.filesDir, "cached_adhan.mp3").delete()
+                                          Toast.makeText(context, "تم اختيار: $name", Toast.LENGTH_SHORT).show()
+                                      }.padding(vertical = 8.dp),
+                                      verticalAlignment = Alignment.CenterVertically
+                                  ) {
+                                      RadioButton(selected = selectedAdhanUrl == url, onClick = null)
+                                      Spacer(Modifier.width(8.dp))
+                                      Text(name, fontSize = 16.sp)
+                                  }
+                              }
+                              Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                  TvButton("تشغيل وتجربة الأذان", Icons.Default.VolumeUp, Modifier.weight(1f)) {
+                                      val i = Intent(context, AdhanService::class.java).apply { putExtra("PRAYER_NAME", "التجربة") }
+                                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(i) else context.startService(i)
+                                  }
+                                  TvButton("إيقاف الصوت", Icons.Default.Stop, Modifier.weight(1f)) {
+                                      context.startService(Intent(context, AdhanService::class.java).apply { action = "STOP_ADHAN" })
+                                  }
+                              }
+                          }
+                      }
+                  }
+
+                  item {
+                      Card(
+                          modifier = Modifier.fillMaxWidth(),
+                          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                          shape = RoundedCornerShape(16.dp)
+                      ) {
+                          Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                              Text("حماية الأذان في الخلفية", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                              Text("اضغط على الزرار بالأسفل وامنح التطبيق استثناء البطارية ليعمل الأذان مدى الحياة دون إغلاق:", fontSize = 14.sp, color = Color.LightGray)
+                              TvButton("تفعيل العمل الدائم في الخلفية", Icons.Default.BatteryChargingFull, Modifier.fillMaxWidth()) {
+                                  val pm = context.getSystemService(PowerManager::class.java)
+                                  if (!pm.isIgnoringBatteryOptimizations(context.packageName)) {
+                                      context.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                          data = Uri.parse("package:${context.packageName}")
+                                      })
+                                  } else {
+                                      Toast.makeText(context, "مُفعّل بالفعل! التطبيق محمي في الخلفية.", Toast.LENGTH_SHORT).show()
+                                  }
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+          EOF
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Build Debug APK
+        run: gradle assembleDebug -Pandroid.useAndroidX=true -Pandroid.enableJetifier=true --stacktrace
+
+      - name: Upload APK to Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hona-AlQuran-APK
+          path: app/build/outputs/apk/debug/*.apk
+
+      - name: Publish Direct OTA Release on GitHub
+        if: always()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "أحدث إصدار من تطبيق هنا القرآن (Direct APK)"
+          files: app/build/outputs/apk/debug/app-debug.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
