@@ -5,6 +5,9 @@ on:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -19,9 +22,9 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Auto-Fix Project Structure and Configs
+      - name: Generate Full v2.0 Project & Download Real Adhan Audio
         run: |
-          # 1. إنشاء ملف gradle.properties في المكان الصحيح إجبارياً
+          # 1. إعداد gradle.properties
           cat << 'EOF' > gradle.properties
           org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
           android.useAndroidX=true
@@ -30,7 +33,7 @@ jobs:
           android.nonTransitiveRClass=true
           EOF
 
-          # 2. ضمان وجود settings.gradle.kts في المجلد الرئيسي
+          # 2. إعداد settings.gradle.kts
           cat << 'EOF' > settings.gradle.kts
           pluginManagement {
               repositories {
@@ -50,7 +53,7 @@ jobs:
           include(":app")
           EOF
 
-          # 3. ضمان وجود build.gradle.kts الرئيسي
+          # 3. إعداد build.gradle.kts الرئيسي
           cat << 'EOF' > build.gradle.kts
           plugins {
               id("com.android.application") version "8.5.0" apply false
@@ -58,19 +61,25 @@ jobs:
           }
           EOF
 
-          # 4. التأكد من مسارات مجلدات التطبيق وإصلاح أي ملف وُضع في مكان خاطئ
+          # 4. إنشاء هيكل المجلدات بالكامل
           mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/raw
           mkdir -p app/src/main/java/com/hona/alquran/service
 
-          # لو تم رفع ملفات الكود في مكان متداخل بالخطأ، نقوم بنقلها لمكانها الصحيح تلقائياً
-          find . -name "PrayerCalculator.kt" -exec cp {} app/src/main/java/com/hona/alquran/PrayerCalculator.kt \; || true
-          find . -name "MainActivity.kt" -exec cp {} app/src/main/java/com/hona/alquran/MainActivity.kt \; || true
-          find . -name "AdhanScheduler.kt" -exec cp {} app/src/main/java/com/hona/alquran/service/AdhanScheduler.kt \; || true
-          find . -name "AdhanReceiver.kt" -exec cp {} app/src/main/java/com/hona/alquran/service/AdhanReceiver.kt \; || true
-          find . -name "AdhanService.kt" -exec cp {} app/src/main/java/com/hona/alquran/service/AdhanService.kt \; || true
-          find . -name "BootReceiver.kt" -exec cp {} app/src/main/java/com/hona/alquran/service/BootReceiver.kt \; || true
+          # 5. تحميل صوت أذان حقيقي نقي داخل التطبيق + أخذ أي ملف رفعه المستخدم
+          find . -maxdepth 3 -name "adhan.mp3" ! -path "./app/src/main/res/raw/adhan.mp3" -exec cp {} app/src/main/res/raw/adhan.mp3 \; || true
+          if [ ! -s app/src/main/res/raw/adhan.mp3 ]; then
+            curl -L -s "https://www.islamcan.com/audio/adhan/azan1.mp3" -o app/src/main/res/raw/adhan.mp3 || true
+          fi
+          # التحقق من أن الملف صوتي سليم وليس صفحة خطأ
+          if [ -f app/src/main/res/raw/adhan.mp3 ]; then
+            FILE_SIZE=$(stat -c%s "app/src/main/res/raw/adhan.mp3" 2>/dev/null || echo 0)
+            if [ "$FILE_SIZE" -lt 15000 ]; then
+              rm -f app/src/main/res/raw/adhan.mp3
+            fi
+          fi
 
-          # 5. ضمان سلامة ملف app/build.gradle.kts
+          # 6. إعداد app/build.gradle.kts
           cat << 'EOF' > app/build.gradle.kts
           plugins {
               id("com.android.application")
@@ -85,8 +94,8 @@ jobs:
                   applicationId = "com.hona.alquran"
                   minSdk = 24
                   targetSdk = 34
-                  versionCode = 1
-                  versionName = "1.0"
+                  versionCode = 2
+                  versionName = "2.0"
               }
 
               compileOptions {
@@ -118,7 +127,7 @@ jobs:
           }
           EOF
 
-          # 6. ضمان سلامة ملف themes.xml و AndroidManifest.xml
+          # 7. إعداد themes.xml
           cat << 'EOF' > app/src/main/res/values/themes.xml
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
@@ -126,6 +135,7 @@ jobs:
           </resources>
           EOF
 
+          # 8. إعداد AndroidManifest.xml مع صلاحيات التحديث التلقائي والتليفزيون
           cat << 'EOF' > app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -142,6 +152,7 @@ jobs:
               <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
               <uses-permission android:name="android.permission.WAKE_LOCK" />
               <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+              <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
               <uses-feature android:name="android.software.leanback" android:required="false" />
               <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
@@ -151,12 +162,14 @@ jobs:
                   android:allowBackup="true"
                   android:label="هنا القرآن"
                   android:supportsRtl="true"
+                  android:usesCleartextTraffic="true"
                   android:theme="@style/Theme.HonaAlQuran"
                   tools:targetApi="34">
 
                   <activity
                       android:name=".MainActivity"
                       android:exported="true"
+                      android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
                       android:screenOrientation="unspecified">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -189,16 +202,643 @@ jobs:
           </manifest>
           EOF
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.7'
+          # 9. كود PrayerCalculator.kt (المواقيت + التاريخ الهجري + الصلاة القادمة)
+          cat << 'EOF' > app/src/main/java/com/hona/alquran/PrayerCalculator.kt
+          package com.hona.alquran
 
-      - name: Build Debug APK
-        run: gradle assembleDebug -Pandroid.useAndroidX=true -Pandroid.enableJetifier=true --stacktrace
+          import android.content.Context
+          import android.icu.util.IslamicCalendar
+          import android.icu.util.ULocale
+          import com.batoulapps.adhan.CalculationMethod
+          import com.batoulapps.adhan.Coordinates
+          import com.batoulapps.adhan.Madhab
+          import com.batoulapps.adhan.PrayerTimes
+          import com.batoulapps.adhan.data.DateComponents
+          import java.text.SimpleDateFormat
+          import java.util.Calendar
+          import java.util.Date
+          import java.util.Locale
+          import java.util.TimeZone
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Hona-AlQuran-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          data class PrayerItem(
+              val name: String,
+              val timeInMillis: Long,
+              val formattedTime: String
+          )
+
+          object PrayerCalculator {
+              fun saveLocation(context: Context, lat: Double, lng: Double) {
+                  context.getSharedPreferences("hona_prefs", Context.MODE_PRIVATE).edit()
+                      .putFloat("lat", lat.toFloat())
+                      .putFloat("lng", lng.toFloat())
+                      .apply()
+              }
+
+              fun getSavedLocation(context: Context): Pair<Double, Double> {
+                  val prefs = context.getSharedPreferences("hona_prefs", Context.MODE_PRIVATE)
+                  val lat = prefs.getFloat("lat", 30.0444f).toDouble()
+                  val lng = prefs.getFloat("lng", 31.2357f).toDouble()
+                  return Pair(lat, lng)
+              }
+
+              fun getTodayPrayers(lat: Double, lng: Double, date: Date = Date()): List<PrayerItem> {
+                  val coordinates = Coordinates(lat, lng)
+                  val dateComponents = DateComponents.from(date)
+                  val params = CalculationMethod.EGYPTIAN.parameters.apply {
+                      madhab = Madhab.SHAFI
+                  }
+                  val prayerTimes = PrayerTimes(coordinates, dateComponents, params)
+                  val sdf = SimpleDateFormat("hh:mm a", Locale("ar")).apply {
+                      timeZone = TimeZone.getDefault()
+                  }
+
+                  return listOf(
+                      PrayerItem("الفجر", prayerTimes.fajr.time, sdf.format(prayerTimes.fajr)),
+                      PrayerItem("الشروق", prayerTimes.sunrise.time, sdf.format(prayerTimes.sunrise)),
+                      PrayerItem("الظهر", prayerTimes.dhuhr.time, sdf.format(prayerTimes.dhuhr)),
+                      PrayerItem("العصر", prayerTimes.asr.time, sdf.format(prayerTimes.asr)),
+                      PrayerItem("المغرب", prayerTimes.maghrib.time, sdf.format(prayerTimes.maghrib)),
+                      PrayerItem("العشاء", prayerTimes.isha.time, sdf.format(prayerTimes.isha))
+                  )
+              }
+
+              fun getNextPrayer(lat: Double, lng: Double): PrayerItem {
+                  val now = System.currentTimeMillis()
+                  val today = getTodayPrayers(lat, lng).filter { it.name != "الشروق" }
+                  val nextToday = today.firstOrNull { it.timeInMillis > now }
+                  if (nextToday != null) return nextToday
+
+                  val cal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 1) }
+                  return getTodayPrayers(lat, lng, cal.time).first()
+              }
+
+              fun getHijriDateString(): String {
+                  return try {
+                      val locale = ULocale("ar@calendar=islamic-umalqura")
+                      val cal = IslamicCalendar(locale)
+                      val day = cal.get(IslamicCalendar.DAY_OF_MONTH)
+                      val month = cal.get(IslamicCalendar.MONTH)
+                      val year = cal.get(IslamicCalendar.YEAR)
+                      val months = listOf(
+                          "محرم", "صفر", "ربيع الأول", "ربيع الآخر",
+                          "جمادى الأولى", "جمادى الآخرة", "رجب", "شعبان",
+                          "رمضان", "شوال", "ذو القعدة", "ذو الحجة"
+                      )
+                      val monthName = months.getOrElse(month) { "" }
+                      "$day $monthName$year هـ"
+                  } catch (e: Exception) {
+                      ""
+                  }
+              }
+          }
+          EOF
+
+          # 10. كود AdhanScheduler.kt
+          cat << 'EOF' > app/src/main/java/com/hona/alquran/service/AdhanScheduler.kt
+          package com.hona.alquran.service
+
+          import android.app.AlarmManager
+          import android.app.PendingIntent
+          import android.content.Context
+          import android.content.Intent
+          import android.os.Build
+          import com.hona.alquran.PrayerCalculator
+          import java.util.Calendar
+
+          object AdhanScheduler {
+              fun scheduleAllPrayers(context: Context) {
+                  val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                  val (lat, lng) = PrayerCalculator.getSavedLocation(context)
+                  val now = System.currentTimeMillis()
+
+                  val todayPrayers = PrayerCalculator.getTodayPrayers(lat, lng).filter { it.name != "الشروق" }
+                  val tomorrowCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 1) }
+                  val tomorrowPrayers = PrayerCalculator.getTodayPrayers(lat, lng, tomorrowCal.time).filter { it.name != "الشروق" }
+
+                  val allUpcoming = (todayPrayers + tomorrowPrayers).filter { it.timeInMillis > now }
+
+                  allUpcoming.forEachIndexed { index, prayer ->
+                      val intent = Intent(context, AdhanReceiver::class.java).apply {
+                          putExtra("PRAYER_NAME", prayer.name)
+                      }
+                      val pendingIntent = PendingIntent.getBroadcast(
+                          context,
+                          100 + index,
+                          intent,
+                          PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                      )
+
+                      try {
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) {
+                              alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, prayer.timeInMillis, pendingIntent)
+                          } else {
+                              alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, prayer.timeInMillis, pendingIntent)
+                          }
+                      } catch (e: SecurityException) {
+                          alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, prayer.timeInMillis, pendingIntent)
+                      }
+                  }
+              }
+          }
+          EOF
+
+          # 11. كود AdhanReceiver.kt
+          cat << 'EOF' > app/src/main/java/com/hona/alquran/service/AdhanReceiver.kt
+          package com.hona.alquran.service
+
+          import android.content.BroadcastReceiver
+          import android.content.Context
+          import android.content.Intent
+          import android.os.Build
+
+          class AdhanReceiver : BroadcastReceiver() {
+              override fun onReceive(context: Context, intent: Intent) {
+                  val prayerName = intent.getStringExtra("PRAYER_NAME") ?: "الصلاة"
+
+                  val serviceIntent = Intent(context, AdhanService::class.java).apply {
+                      putExtra("PRAYER_NAME", prayerName)
+                  }
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      context.startForegroundService(serviceIntent)
+                  } else {
+                      context.startService(serviceIntent)
+                  }
+
+                  AdhanScheduler.scheduleAllPrayers(context)
+              }
+          }
+          EOF
+
+          # 12. كود AdhanService.kt (تشغيل الأذان المدمج أو أونلاين مع ضمان عدم التوقف)
+          cat << 'EOF' > app/src/main/java/com/hona/alquran/service/AdhanService.kt
+          package com.hona.alquran.service
+
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.PendingIntent
+          import android.app.Service
+          import android.content.Context
+          import android.content.Intent
+          import android.media.AudioAttributes
+          import android.media.MediaPlayer
+          import android.media.RingtoneManager
+          import android.os.Build
+          import android.os.IBinder
+          import android.os.PowerManager
+          import androidx.core.app.NotificationCompat
+          import com.hona.alquran.MainActivity
+          import java.io.File
+          import java.net.URL
+
+          class AdhanService : Service() {
+              private var mediaPlayer: MediaPlayer? = null
+              private var wakeLock: PowerManager.WakeLock? = null
+              private val channelId = "hona_adhan_channel"
+
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  if (intent?.action == "STOP_ADHAN") {
+                      stopSelf()
+                      return START_NOT_STICKY
+                  }
+
+                  val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                  wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "HonaAlQuran::AdhanWakeLock").apply {
+                      acquire(5 * 60 * 1000L)
+                  }
+
+                  val prayerName = intent?.getStringExtra("PRAYER_NAME") ?: "الصلاة"
+                  createNotificationChannel()
+
+                  val stopIntent = Intent(this, AdhanService::class.java).apply { action = "STOP_ADHAN" }
+                  val stopPendingIntent = PendingIntent.getService(
+                      this, 0, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                  )
+
+                  val openAppIntent = PendingIntent.getActivity(
+                      this, 1, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+                  )
+
+                  val notification = NotificationCompat.Builder(this, channelId)
+                      .setContentTitle("هنا القرآن - حان الآن موعد أذان $prayerName")
+                      .setContentText("حي على الصلاة.. حي على الفلاح (اضغط لإيقاف الأذان)")
+                      .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+                      .setPriority(NotificationCompat.PRIORITY_MAX)
+                      .setCategory(NotificationCompat.CATEGORY_ALARM)
+                      .setContentIntent(openAppIntent)
+                      .addAction(android.R.drawable.ic_media_pause, "إيقاف الأذان", stopPendingIntent)
+                      .setOngoing(true)
+                      .build()
+
+                  startForeground(1001, notification)
+                  playAdhanAudio()
+
+                  return START_NOT_STICKY
+              }
+
+              private fun playAdhanAudio() {
+                  Thread {
+                      try {
+                          mediaPlayer?.release()
+                          val prefs = getSharedPreferences("hona_prefs", Context.MODE_PRIVATE)
+                          val selectedUrl = prefs.getString("adhan_url", "https://www.islamcan.com/audio/adhan/azan1.mp3")!!
+
+                          val attrs = AudioAttributes.Builder()
+                              .setUsage(AudioAttributes.USAGE_ALARM)
+                              .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                              .build()
+
+                          val resId = resources.getIdentifier("adhan", "raw", packageName)
+                          val cachedFile = File(filesDir, "cached_adhan.mp3")
+
+                          // إذا لم يغير المستخدم المؤذن وكان ملف raw/adhan موجوداً نشغله فوراً بدون نت
+                          if (resId != 0 && !prefs.contains("adhan_url")) {
+                              val afd = resources.openRawResourceFd(resId)
+                              mediaPlayer = MediaPlayer().apply {
+                                  setAudioAttributes(attrs)
+                                  setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                                  afd.close()
+                                  prepare()
+                                  setOnCompletionListener { stopSelf() }
+                                  start()
+                              }
+                              return@Thread
+                          }
+
+                          // تحميل صوت المؤذن المختار وحفظه محلياً
+                          if (!cachedFile.exists() || cachedFile.length() < 15000) {
+                              try {
+                                  URL(selectedUrl).openStream().use { input ->
+                                      cachedFile.outputStream().use { output -> input.copyTo(output) }
+                                  }
+                              } catch (_: Exception) {}
+                          }
+
+                          if (cachedFile.exists() && cachedFile.length() > 15000) {
+                              mediaPlayer = MediaPlayer().apply {
+                                  setAudioAttributes(attrs)
+                                  setDataSource(cachedFile.absolutePath)
+                                  prepare()
+                                  setOnCompletionListener { stopSelf() }
+                                  start()
+                              }
+                          } else if (resId != 0) {
+                              val afd = resources.openRawResourceFd(resId)
+                              mediaPlayer = MediaPlayer().apply {
+                                  setAudioAttributes(attrs)
+                                  setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                                  afd.close()
+                                  prepare()
+                                  setOnCompletionListener { stopSelf() }
+                                  start()
+                              }
+                          } else {
+                              val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                              mediaPlayer = MediaPlayer().apply {
+                                  setAudioAttributes(attrs)
+                                  setDataSource(applicationContext, alarmUri)
+                                  prepare()
+                                  setOnCompletionListener { stopSelf() }
+                                  start()
+                              }
+                          }
+                      } catch (e: Exception) {
+                          e.printStackTrace()
+                          stopSelf()
+                      }
+                  }.start()
+              }
+
+              private fun createNotificationChannel() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      val channel = NotificationChannel(
+                          channelId,
+                          "تنبيهات الأذان - هنا القرآن",
+                          NotificationManager.IMPORTANCE_HIGH
+                      )
+                      getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+                  }
+              }
+
+              override fun onDestroy() {
+                  try {
+                      mediaPlayer?.stop()
+                      mediaPlayer?.release()
+                  } catch (_: Exception) {}
+                  mediaPlayer = null
+                  if (wakeLock?.isHeld == true) wakeLock?.release()
+                  super.onDestroy()
+              }
+
+              override fun onBind(intent: Intent?): IBinder? = null
+          }
+          EOF
+
+          # 13. كود BootReceiver.kt
+          cat << 'EOF' > app/src/main/java/com/hona/alquran/service/BootReceiver.kt
+          package com.hona.alquran.service
+
+          import android.content.BroadcastReceiver
+          import android.content.Context
+          import android.content.Intent
+
+          class BootReceiver : BroadcastReceiver() {
+              override fun onReceive(context: Context, intent: Intent) {
+                  if (intent.action == Intent.ACTION_BOOT_COMPLETED ||
+                      intent.action == "android.intent.action.QUICKBOOT_POWERON"
+                  ) {
+                      AdhanScheduler.scheduleAllPrayers(context)
+                  }
+              }
+          }
+          EOF
+
+          # 14. كود MainActivity.kt الشامل (التحديث أونلاين + المواقيت + القرآن الصوتي + الأذكار + السبحة)
+          cat << 'EOF' > app/src/main/java/com/hona/alquran/MainActivity.kt
+          package com.hona.alquran
+
+          import android.Manifest
+          import android.annotation.SuppressLint
+          import android.app.DownloadManager
+          import android.content.Context
+          import android.content.Intent
+          import android.media.AudioAttributes
+          import android.media.MediaPlayer
+          import android.net.Uri
+          import android.os.Build
+          import android.os.Bundle
+          import android.os.Environment
+          import android.os.PowerManager
+          import android.provider.Settings
+          import android.widget.Toast
+          import androidx.activity.ComponentActivity
+          import androidx.activity.compose.rememberLauncherForActivityResult
+          import androidx.activity.compose.setContent
+          import androidx.activity.result.contract.ActivityResultContracts
+          import androidx.compose.foundation.background
+          import androidx.compose.foundation.border
+          import androidx.compose.foundation.clickable
+          import androidx.compose.foundation.focusable
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.lazy.LazyColumn
+          import androidx.compose.foundation.lazy.items
+          import androidx.compose.foundation.shape.CircleShape
+          import androidx.compose.foundation.shape.RoundedCornerShape
+          import androidx.compose.material.icons.Icons
+          import androidx.compose.material.icons.filled.*
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.focus.onFocusChanged
+          import androidx.compose.ui.graphics.Color
+          import androidx.compose.ui.graphics.vector.ImageVector
+          import androidx.compose.ui.platform.LocalConfiguration
+          import androidx.compose.ui.platform.LocalContext
+          import androidx.compose.ui.platform.LocalLayoutDirection
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.text.style.TextAlign
+          import androidx.compose.ui.unit.LayoutDirection
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+          import com.google.android.gms.location.LocationServices
+          import com.hona.alquran.service.AdhanScheduler
+          import com.hona.alquran.service.AdhanService
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.delay
+          import kotlinx.coroutines.launch
+          import kotlinx.coroutines.withContext
+          import org.json.JSONObject
+          import java.io.File
+          import java.net.URL
+          import java.text.SimpleDateFormat
+          import java.util.Date
+          import java.util.Locale
+
+          data class SurahInfo(val number: Int, val name: String, val ayahsCount: Int)
+          data class AyahWithTafsir(val numberInSurah: Int, val text: String, val tafsir: String)
+          data class ZikrItem(val category: String, val text: String, val targetCount: Int)
+          data class Reciter(val name: String, val serverUrl: String)
+
+          val QURAN_RECITERS = listOf(
+              Reciter("مشاري راشد العفاسي", "https://server8.mp3quran.net/afs"),
+              Reciter("محمود خليل الحصري", "https://server13.mp3quran.net/husr"),
+              Reciter("عبد الباسط عبد الصمد", "https://server7.mp3quran.net/basit"),
+              Reciter("محمد صديق المنشاوي", "https://server10.mp3quran.net/minsh")
+          )
+
+          val ADHAN_VOICES = listOf(
+              "أذان مكة المكرمة" to "https://www.islamcan.com/audio/adhan/azan1.mp3",
+              "أذان المسجد النبوي" to "https://www.islamcan.com/audio/adhan/azan2.mp3",
+              "أذان عبد الباسط" to "https://www.islamcan.com/audio/adhan/azan3.mp3"
+          )
+
+          val AZKAR_LIST = listOf(
+              ZikrItem("أذكار الصباح", "أَصْبَحْنَا وَأَصْبَحَ الْمُلْكُ لِلَّهِ، وَالْحَمْدُ لِلَّهِ لاَ إِلَـهَ إِلاَّ اللهُ وَحْدَهُ لاَ شَرِيكَ لَهُ.", 1),
+              ZikrItem("أذكار الصباح", "سُبْحَانَ اللهِ وَبِحَمْدِهِ: عَدَدَ خَلْقِهِ، وَرِضَا نَفْسِهِ، وَزِنَةَ عَرْشِهِ، وَمِدَادَ كَلِمَاتِهِ.", 3),
+              ZikrItem("أذكار الصباح", "بِسْمِ اللهِ الَّذِي لاَ يَضُرُّ مَعَ اسْمِهِ شَيْءٌ فِي الأَرْضِ وَلاَ فِي السَّمَاءِ وَهُوَ السَّمِيعُ الْعَلِيمُ.", 3),
+              ZikrItem("أذكار المساء", "أَمْسَيْنَا وَأَمْسَى الْمُلْكُ لِلَّهِ، وَالْحَمْدُ لِلَّهِ لاَ إِلَـهَ إِلاَّ اللهُ وَحْدَهُ لاَ شَرِيكَ لَهُ.", 1),
+              ZikrItem("أذكار المساء", "أَعُوذُ بِكَلِمَاتِ اللهِ التَّامَّاتِ مِنْ شَرِّ مَا خَلَقَ.", 3),
+              ZikrItem("أذكار المساء", "اللَّهُمَّ بِكَ أَمْسَيْنَا، وَبِكَ أَصْبَحْنَا، وَبِكَ نَحْيَا، وَبِكَ نَمُوتُ، وَإِلَيْكَ الْمَصِيرُ.", 1),
+              ZikrItem("بعد الصلاة", "أَسْتَغْفِرُ اللهَ (ثَلاَثاً) اللَّهُمَّ أَنْتَ السَّلاَمُ، وَمِنْكَ السَّلاَمُ، تَبَارَكْتَ يَا ذَا الْجَلاَلِ وَالإِكْرَامِ.", 1),
+              ZikrItem("بعد الصلاة", "سُبْحَانَ اللهِ (33) الْحَمْدُ لِلَّهِ (33) اللهُ أَكْبَرُ (33)", 33)
+          )
+
+          class MainActivity : ComponentActivity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  AdhanScheduler.scheduleAllPrayers(this)
+                  setContent {
+                      CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                          MaterialTheme(
+                              colorScheme = darkColorScheme(
+                                  primary = Color(0xFFD4AF37),
+                                  background = Color(0xFF0A1619),
+                                  surface = Color(0xFF13272C),
+                                  onPrimary = Color.Black,
+                                  onBackground = Color.White,
+                                  onSurface = Color.White
+                              )
+                          ) {
+                              Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                                  HonaAlQuranMain()
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+
+          @SuppressLint("MissingPermission")
+          @Composable
+          fun HonaAlQuranMain() {
+              val context = LocalContext.current
+              val configuration = LocalConfiguration.current
+              val isWideScreen = configuration.screenWidthDp >= 640
+
+              var selectedTab by remember { mutableIntStateOf(0) }
+              var prayers by remember { mutableStateOf(emptyList<PrayerItem>()) }
+              var nextPrayer by remember { mutableStateOf<PrayerItem?>(null) }
+              var countdownText by remember { mutableStateOf("00:00:00") }
+              var locationStatus by remember { mutableStateOf("القاهرة (اضغط لتحديث GPS)") }
+
+              fun refreshPrayers() {
+                  val (lat, lng) = PrayerCalculator.getSavedLocation(context)
+                  prayers = PrayerCalculator.getTodayPrayers(lat, lng)
+                  nextPrayer = PrayerCalculator.getNextPrayer(lat, lng)
+              }
+
+              val permissionLauncher = rememberLauncherForActivityResult(
+                  ActivityResultContracts.RequestMultiplePermissions()
+              ) { perms ->
+                  if (perms[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                      perms[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+                  ) {
+                      LocationServices.getFusedLocationProviderClient(context).lastLocation.addOnSuccessListener { loc ->
+                          if (loc != null) {
+                              PrayerCalculator.saveLocation(context, loc.latitude, loc.longitude)
+                              refreshPrayers()
+                              locationStatus = "مُحدّث تلقائياً عبر GPS"
+                              AdhanScheduler.scheduleAllPrayers(context)
+                          }
+                      }
+                  }
+              }
+
+              LaunchedEffect(Unit) {
+                  refreshPrayers()
+                  val perms = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) perms.add(Manifest.permission.POST_NOTIFICATIONS)
+                  permissionLauncher.launch(perms.toTypedArray())
+              }
+
+              // عداد تنازلي حي كل ثانية للصلاة القادمة
+              LaunchedEffect(nextPrayer) {
+                  while (true) {
+                      val np = nextPrayer
+                      if (np != null) {
+                          val diff = np.timeInMillis - System.currentTimeMillis()
+                          if (diff <= 0) {
+                              refreshPrayers()
+                          } else {
+                              val h = diff / (1000 * 60 * 60)
+                              val m = (diff / (1000 * 60)) % 60
+                              val s = (diff / 1000) % 60
+                              countdownText = String.format(Locale.US, "%02d:%02d:%02d", h, m, s)
+                          }
+                      }
+                      delay(1000)
+                  }
+              }
+
+              if (isWideScreen) {
+                  // تصميم التليفزيون السمارت والتابلت (قائمة جانبية + محتوى عريض)
+                  Row(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                      Card(
+                          modifier = Modifier.width(230.dp).fillMaxHeight(),
+                          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                          shape = RoundedCornerShape(18.dp)
+                      ) {
+                          Column(
+                              modifier = Modifier.fillMaxSize().padding(14.dp),
+                              verticalArrangement = Arrangement.SpaceBetween
+                          ) {
+                              Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                  Text("هنا القرآن", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                  Text(PrayerCalculator.getHijriDateString(), fontSize = 13.sp, color = Color.LightGray)
+                                  HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp), color = Color.Gray.copy(alpha = 0.3f))
+
+                                  SideNavButton("مواقيت الصلاة", Icons.Default.AccessTime, selectedTab == 0) { selectedTab = 0 }
+                                  SideNavButton("القرآن والتفسير", Icons.Default.MenuBook, selectedTab == 1) { selectedTab = 1 }
+                                  SideNavButton("الأذكار والسبحة", Icons.Default.Favorite, selectedTab == 2) { selectedTab = 2 }
+                                  SideNavButton("الإعدادات والتحديث", Icons.Default.Settings, selectedTab == 3) { selectedTab = 3 }
+                              }
+                              TvButton("إيقاف صوت الأذان", Icons.Default.NotificationsOff, Modifier.fillMaxWidth()) {
+                                  context.startService(Intent(context, AdhanService::class.java).apply { action = "STOP_ADHAN" })
+                              }
+                          }
+                      }
+
+                      Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                          when (selectedTab) {
+                              0 -> PrayerDashboard(prayers, nextPrayer, countdownText, locationStatus)
+                              1 -> QuranScreen()
+                              2 -> AzkarAndTasbeehScreen()
+                              3 -> SettingsAndUpdateScreen()
+                          }
+                      }
+                  }
+              } else {
+                  // تصميم الموبايل المتجاوب
+                  Scaffold(
+                      topBar = {
+                          Row(
+                              modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 16.dp, vertical = 10.dp),
+                              horizontalArrangement = Arrangement.SpaceBetween,
+                              verticalAlignment = Alignment.CenterVertically
+                          ) {
+                              Column {
+                                  Text("هنا القرآن", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                  Text(PrayerCalculator.getHijriDateString(), fontSize = 12.sp, color = Color.LightGray)
+                              }
+                              Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                  TvButton("تجربة الأذان", Icons.Default.VolumeUp) {
+                                      val i = Intent(context, AdhanService::class.java).apply { putExtra("PRAYER_NAME", "التجربة") }
+                                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(i) else context.startService(i)
+                                  }
+                                  IconButton(onClick = {
+                                      context.startService(Intent(context, AdhanService::class.java).apply { action = "STOP_ADHAN" })
+                                  }) {
+                                      Icon(Icons.Default.StopCircle, contentDescription = "إيقاف", tint = Color(0xFFFF6B6B))
+                                  }
+                              }
+                          }
+                      },
+                      bottomBar = {
+                          NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                              NavigationBarItem(selected = selectedTab == 0, onClick = { selectedTab = 0 }, icon = { Icon(Icons.Default.AccessTime, null) }, label = { Text("الصلاة") })
+                              NavigationBarItem(selected = selectedTab == 1, onClick = { selectedTab = 1 }, icon = { Icon(Icons.Default.MenuBook, null) }, label = { Text("القرآن") })
+                              NavigationBarItem(selected = selectedTab == 2, onClick = { selectedTab = 2 }, icon = { Icon(Icons.Default.Favorite, null) }, label = { Text("الأذكار") })
+                              NavigationBarItem(selected = selectedTab == 3, onClick = { selectedTab = 3 }, icon = { Icon(Icons.Default.SystemUpdate, null) }, label = { Text("التحديث") })
+                          }
+                      }
+                  ) { innerPadding ->
+                      Box(modifier = Modifier.fillMaxSize().padding(innerPadding).padding(12.dp)) {
+                          when (selectedTab) {
+                              0 -> PrayerDashboard(prayers, nextPrayer, countdownText, locationStatus)
+                              1 -> QuranScreen()
+                              2 -> AzkarAndTasbeehScreen()
+                              3 -> SettingsAndUpdateScreen()
+                          }
+                      }
+                  }
+              }
+          }
+
+          @Composable
+          fun SideNavButton(title: String, icon: ImageVector, isSelected: Boolean, onClick: () -> Unit) {
+              var focused by remember { mutableStateOf(false) }
+              Row(
+                  modifier = Modifier
+                      .fillMaxWidth()
+                      .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else Color.Transparent, RoundedCornerShape(12.dp))
+                      .onFocusChanged { focused = it.isFocused }
+                      .focusable()
+                      .border(if (focused) 2.dp else 0.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
+                      .clickable { onClick() }
+                      .padding(12.dp),
+                  verticalAlignment = Alignment.CenterVertically
+              ) {
+                  Icon(icon, null, tint = if (isSelected) MaterialTheme.colorScheme.primary else Color.White)
+                  Spacer(Modifier.width(10.dp))
+                  Text(title, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal, color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White)
+              }
+          }
+
+          @Composable
+          fun TvButton(text: String, icon: ImageVector, modifier: Modifier = Modifier, onClick: () -> Unit) {
+              var focused by remember { mutableStateOf(false) }
+              Button(
+                  onClick = onClick,
+                  modifier = modifier
+                      .onFocusChanged { focused = it.isFocused }
+                      .focus
