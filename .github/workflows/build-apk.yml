@@ -1,4 +1,4 @@
-name: Build Signed Release APK (Al-Hana v4.1)
+name: Build Signed Release APK (HANA EL Quran v5.0)
 
 on:
   push:
@@ -22,8 +22,11 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Generate Full v4.1 Project (Hana Al-Quran)
+      - name: Clean Old Files & Generate v5.0 Project
         run: |
+          rm -rf app/src/main/java
+          rm -rf app/build
+
           # 1. إعداد gradle.properties
           cat << 'EOF' > gradle.properties
           org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
@@ -89,7 +92,7 @@ jobs:
             fi
           fi
 
-          # 6. إعداد FileProvider لتثبيت التحديث من داخل التطبيق مباشرة بدون خطأ الحزمة
+          # 6. إعداد FileProvider للتحديث الداخلي المباشر
           cat << 'EOF' > app/src/main/res/xml/file_paths.xml
           <?xml version="1.0" encoding="utf-8"?>
           <paths>
@@ -99,7 +102,7 @@ jobs:
           </paths>
           EOF
 
-          # 7. أيقونة التطبيق الاحترافية وبانر التليفزيون
+          # 7. أيقونة التطبيق الاحترافية
           cat << 'EOF' > app/src/main/res/drawable/ic_launcher_background.xml
           <?xml version="1.0" encoding="utf-8"?>
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
@@ -137,14 +140,14 @@ jobs:
           </adaptive-icon>
           EOF
 
-          # 8. إعداد قواعد ProGuard لتقليل حجم التطبيق بأمان دون تعطيل الكود
+          # 8. قواعد ProGuard
           cat << 'EOF' > app/proguard-rules.pro
           -keep class com.hona.alquran.** { *; }
           -keep class com.batoulapps.adhan.** { *; }
           -dontwarn **
           EOF
 
-          # 9. إعداد app/build.gradle.kts (مع تقليص الحجم والتوقيع الموحد)
+          # 9. إعداد app/build.gradle.kts
           cat << 'EOF' > app/build.gradle.kts
           plugins {
               id("com.android.application")
@@ -159,8 +162,8 @@ jobs:
                   applicationId = "alhana.quran"
                   minSdk = 24
                   targetSdk = 34
-                  versionCode = 5
-                  versionName = "4.1"
+                  versionCode = 7
+                  versionName = "5.0"
                   resourceConfigurations += setOf("ar", "en")
               }
 
@@ -222,7 +225,7 @@ jobs:
           </resources>
           EOF
 
-          # 11. إعداد AndroidManifest.xml (مع FileProvider للتحديث الداخلي)
+          # 11. إعداد AndroidManifest.xml (الاسم: هَنَا القُرآن - HANA EL Quran + خدمة تشغيل القرآن والراديو بالخلفية)
           cat << 'EOF' > app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -248,7 +251,7 @@ jobs:
 
               <application
                   android:allowBackup="true"
-                  android:label="هَنَا القُرآن"
+                  android:label="هَنَا القُرآن - HANA EL Quran"
                   android:icon="@mipmap/ic_launcher"
                   android:roundIcon="@mipmap/ic_launcher_round"
                   android:banner="@mipmap/ic_launcher"
@@ -286,12 +289,23 @@ jobs:
                           <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                       </intent-filter>
                   </receiver>
-                  <service android:name=".service.AdhanService" android:enabled="true" android:exported="false" android:foregroundServiceType="mediaPlayback" />
+
+                  <service
+                      android:name=".service.AdhanService"
+                      android:enabled="true"
+                      android:exported="false"
+                      android:foregroundServiceType="mediaPlayback" />
+
+                  <service
+                      android:name=".service.MediaPlaybackService"
+                      android:enabled="true"
+                      android:exported="false"
+                      android:foregroundServiceType="mediaPlayback" />
               </application>
           </manifest>
           EOF
 
-          # 12. كود PrayerCalculator.kt (تم تصحيح MUSLIM_WORLD_LEAGUE)
+          # 12. كود PrayerCalculator.kt
           cat << 'EOF' > app/src/main/java/com/hona/alquran/PrayerCalculator.kt
           package com.hona.alquran
 
@@ -370,7 +384,7 @@ jobs:
           }
           EOF
 
-          # 13. خدمات الأذان في الخلفية (مع تشغيل ملف raw/adhan المدمج أولاً)
+          # 13. خدمات الأذان في الخلفية
           cat << 'EOF' > app/src/main/java/com/hona/alquran/service/AdhanScheduler.kt
           package com.hona.alquran.service
 
@@ -481,7 +495,6 @@ jobs:
 
                           val resId = resources.getIdentifier("adhan", "raw", packageName)
 
-                          // 1. إذا اختار المستخدم أذان المحور المدمج داخل التطبيق (أو افتراضياً) يشتغل فوراً بدون إنترنت
                           if (selectedUrl == "RAW_BUILTIN" && resId != 0) {
                               val afd = resources.openRawResourceFd(resId)
                               mp = MediaPlayer().apply {
@@ -495,7 +508,6 @@ jobs:
                               return@Thread
                           }
 
-                          // 2. إذا اختار صوتاً أونلاين، يحمله بصيغة سليمة مع User-Agent
                           val cached = File(filesDir, "custom_adhan.mp3")
                           if (!cached.exists() || cached.length() < 20000) {
                               try {
@@ -551,6 +563,171 @@ jobs:
           }
           EOF
 
+          # 14. خدمة تشغيل القرآن الكريم والراديو في الخلفية مع أزرار Play/Pause و Stop في الإشعارات
+          cat << 'EOF' > app/src/main/java/com/hona/alquran/service/MediaPlaybackService.kt
+          package com.hona.alquran.service
+
+          import android.app.*
+          import android.content.Context
+          import android.content.Intent
+          import android.media.AudioAttributes
+          import android.media.MediaPlayer
+          import android.os.Build
+          import android.os.IBinder
+          import android.os.PowerManager
+          import androidx.compose.runtime.mutableStateOf
+          import androidx.core.app.NotificationCompat
+          import com.hona.alquran.MainActivity
+
+          class MediaPlaybackService : Service() {
+              companion object {
+                  var currentTitle = mutableStateOf<String?>(null)
+                  var currentUrl = mutableStateOf<String?>(null)
+                  var isPlaying = mutableStateOf(false)
+                  var isBuffering = mutableStateOf(false)
+              }
+
+              private var mp: MediaPlayer? = null
+              private var wl: PowerManager.WakeLock? = null
+              private val channelId = "hana_media_playback"
+              private var titleText: String = "تلاوة القرآن الكريم"
+              private var subtitleText: String = "هَنَا القُرآن - HANA EL Quran"
+
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  when (intent?.action) {
+                      "ACTION_PLAY" -> {
+                          val url = intent.getStringExtra("URL") ?: return START_NOT_STICKY
+                          titleText = intent.getStringExtra("TITLE") ?: "تلاوة القرآن الكريم"
+                          subtitleText = intent.getStringExtra("SUBTITLE") ?: "هَنَا القُرآن - HANA EL Quran"
+                          startPlayback(url)
+                      }
+                      "ACTION_TOGGLE" -> {
+                          togglePlayPause()
+                      }
+                      "ACTION_STOP" -> {
+                          stopPlayback()
+                      }
+                  }
+                  return START_NOT_STICKY
+              }
+
+              private fun startPlayback(url: String) {
+                  if (wl == null) {
+                      val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                      wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Hana::MediaWakeLock").apply { acquire(3 * 60 * 60 * 1000L) }
+                  }
+                  currentTitle.value = titleText
+                  currentUrl.value = url
+                  isBuffering.value = true
+                  isPlaying.value = false
+                  updateNotification("جاري التحميل والتشغيل...")
+
+                  Thread {
+                      try {
+                          mp?.release()
+                          mp = MediaPlayer().apply {
+                              setAudioAttributes(
+                                  AudioAttributes.Builder()
+                                      .setUsage(AudioAttributes.USAGE_MEDIA)
+                                      .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                                      .build()
+                              )
+                              setDataSource(url)
+                              setOnPreparedListener {
+                                  isBuffering.value = false
+                                  isPlaying.value = true
+                                  it.start()
+                                  updateNotification(subtitleText)
+                              }
+                              setOnCompletionListener {
+                                  stopPlayback()
+                              }
+                              setOnErrorListener { _, _, _ ->
+                                  stopPlayback()
+                                  true
+                              }
+                              prepareAsync()
+                          }
+                      } catch (_: Exception) {
+                          stopPlayback()
+                      }
+                  }.start()
+              }
+
+              private fun togglePlayPause() {
+                  try {
+                      val player = mp ?: return
+                      if (player.isPlaying) {
+                          player.pause()
+                          isPlaying.value = false
+                          updateNotification("متوقف مؤقتاً - $subtitleText")
+                      } else {
+                          player.start()
+                          isPlaying.value = true
+                          updateNotification(subtitleText)
+                      }
+                  } catch (_: Exception) {}
+              }
+
+              private fun stopPlayback() {
+                  isPlaying.value = false
+                  isBuffering.value = false
+                  currentTitle.value = null
+                  currentUrl.value = null
+                  try {
+                      mp?.stop()
+                      mp?.release()
+                  } catch (_: Exception) {}
+                  mp = null
+                  if (wl?.isHeld == true) wl?.release()
+                  wl = null
+                  stopForeground(STOP_FOREGROUND_REMOVE)
+                  stopSelf()
+              }
+
+              private fun updateNotification(statusSubText: String) {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      val ch = NotificationChannel(channelId, "مشغل القرآن والراديو", NotificationManager.IMPORTANCE_LOW)
+                      getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
+                  }
+
+                  val openPi = PendingIntent.getActivity(
+                      this, 10, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+                  )
+                  val togglePi = PendingIntent.getService(
+                      this, 11, Intent(this, MediaPlaybackService::class.java).apply { action = "ACTION_TOGGLE" },
+                      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                  )
+                  val stopPi = PendingIntent.getService(
+                      this, 12, Intent(this, MediaPlaybackService::class.java).apply { action = "ACTION_STOP" },
+                      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                  )
+
+                  val playPauseIcon = if (isPlaying.value) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+                  val playPauseLabel = if (isPlaying.value) "إيقاف مؤقت" else "تشغيل"
+
+                  val notif = NotificationCompat.Builder(this, channelId)
+                      .setContentTitle(titleText)
+                      .setContentText(statusSubText)
+                      .setSmallIcon(android.R.drawable.ic_media_play)
+                      .setContentIntent(openPi)
+                      .addAction(playPauseIcon, playPauseLabel, togglePi)
+                      .addAction(android.R.drawable.ic_delete, "إيقاف", stopPi)
+                      .setOngoing(isPlaying.value || isBuffering.value)
+                      .build()
+
+                  startForeground(2002, notif)
+              }
+
+              override fun onDestroy() {
+                  stopPlayback()
+                  super.onDestroy()
+              }
+
+              override fun onBind(intent: Intent?): IBinder? = null
+          }
+          EOF
+
           cat << 'EOF' > app/src/main/java/com/hona/alquran/service/BootReceiver.kt
           package com.hona.alquran.service
 
@@ -567,17 +744,17 @@ jobs:
           }
           EOF
 
-          # 14. كود MainActivity.kt (تحديث داخلي مباشر + تنسيق عربي سليم + عدم تقطيع الكلمات)
+          # 15. كود MainActivity.kt (الإصدار 5.0 الشامل)
           cat << 'EOF' > app/src/main/java/com/hona/alquran/MainActivity.kt
           package com.hona.alquran
 
           import android.Manifest
           import android.annotation.SuppressLint
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
           import android.content.Context
           import android.content.Intent
           import android.hardware.*
-          import android.media.AudioAttributes
-          import android.media.MediaPlayer
           import android.net.Uri
           import android.os.*
           import android.provider.Settings
@@ -607,6 +784,7 @@ jobs:
           import androidx.compose.ui.text.style.TextAlign
           import androidx.compose.ui.text.style.TextOverflow
           import androidx.compose.ui.unit.*
+          import androidx.core.app.NotificationCompat
           import androidx.core.content.FileProvider
           import com.google.android.gms.location.LocationServices
           import com.hona.alquran.service.*
@@ -617,6 +795,8 @@ jobs:
           import java.net.URL
           import java.text.SimpleDateFormat
           import java.util.*
+
+          const val CURRENT_APP_VERSION = "5.0"
 
           data class SurahInfo(val number: Int, val name: String, val ayahsCount: Int)
           data class AyahWithTafsir(val numberInSurah: Int, val text: String, val tafsir: String)
@@ -655,6 +835,24 @@ jobs:
               ZikrItem("بعد الصلاة", "أَسْتَغْفِرُ اللهَ (ثَلاَثاً) اللَّهُمَّ أَنْتَ السَّلاَمُ، وَمِنْكَ السَّلاَمُ، تَبَارَكْتَ يَا ذَا الْجَلاَلِ وَالإِكْرَامِ.", "سنة عقب كل صلاة", 1),
               ZikrItem("بعد الصلاة", "سُبْحَانَ اللهِ (33) • الْحَمْدُ لِلَّهِ (33) • اللهُ أَكْبَرُ (33)", "غُفرت خطاياه وإن كانت مثل زبد البحر", 33)
           )
+
+          fun startMediaService(context: Context, url: String, title: String, subtitle: String) {
+              val intent = Intent(context, MediaPlaybackService::class.java).apply {
+                  action = "ACTION_PLAY"
+                  putExtra("URL", url)
+                  putExtra("TITLE", title)
+                  putExtra("SUBTITLE", subtitle)
+              }
+              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
+          }
+
+          fun toggleMediaService(context: Context) {
+              context.startService(Intent(context, MediaPlaybackService::class.java).apply { action = "ACTION_TOGGLE" })
+          }
+
+          fun stopMediaService(context: Context) {
+              context.startService(Intent(context, MediaPlaybackService::class.java).apply { action = "ACTION_STOP" })
+          }
 
           class MainActivity : ComponentActivity() {
               override fun onCreate(savedInstanceState: Bundle?) {
@@ -699,6 +897,7 @@ jobs:
               var nextP by remember { mutableStateOf<PrayerItem?>(null) }
               var countdown by remember { mutableStateOf("00:00:00") }
               var locStatus by remember { mutableStateOf("مواقيت الصلاة حسب موقعك الحالي") }
+              var availableUpdateName by remember { mutableStateOf<String?>(null) }
 
               fun refresh() {
                   val (lat, lng) = PrayerCalculator.getSavedLocation(context)
@@ -719,11 +918,39 @@ jobs:
                   }
               }
 
+              // الفحص التلقائي لوجود تحديث جديد عند فتح التطبيق وإرسال إشعار
               LaunchedEffect(Unit) {
                   refresh()
                   val perms = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) perms.add(Manifest.permission.POST_NOTIFICATIONS)
                   permLauncher.launch(perms.toTypedArray())
+
+                  withContext(Dispatchers.IO) {
+                      try {
+                          val conn = (URL("https://api.github.com/repos/Alifathy2/HANA-Quran-Prayer/releases/latest").openConnection() as HttpURLConnection).apply {
+                              setRequestProperty("User-Agent", "Mozilla/5.0")
+                              connectTimeout = 8000
+                          }
+                          val json = conn.inputStream.bufferedReader().readText()
+                          val releaseTitle = JSONObject(json).optString("name", "")
+                          if (releaseTitle.isNotEmpty() && !releaseTitle.contains("v$CURRENT_APP_VERSION")) {
+                              withContext(Dispatchers.Main) {
+                                  availableUpdateName = releaseTitle
+                                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                      val nm = context.getSystemService(NotificationManager::class.java)
+                                      nm.createNotificationChannel(NotificationChannel("upd_ch", "تحديثات التطبيق", NotificationManager.IMPORTANCE_HIGH))
+                                      val notif = NotificationCompat.Builder(context, "upd_ch")
+                                          .setContentTitle("تحديث جديد متاح لتطبيق هَنَا القُرآن")
+                                          .setContentText("الإصدار المتاح: $releaseTitle - افتح الإعدادات للتحديث الآن")
+                                          .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                                          .setAutoCancel(true)
+                                          .build()
+                                      nm.notify(3003, notif)
+                                  }
+                              }
+                          }
+                      } catch (_: Exception) {}
+                  }
               }
 
               LaunchedEffect(nextP) {
@@ -737,26 +964,46 @@ jobs:
                   }
               }
 
+              if (availableUpdateName != null) {
+                  AlertDialog(
+                      onDismissRequest = { availableUpdateName = null },
+                      title = { Text("تحديث جديد متاح!", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) },
+                      text = { Text("يتوفر إصدار جديد من التطبيق ($availableUpdateName). هل ترغب في الانتقال إلى الإعدادات لتحديث التطبيق الآن؟") },
+                      confirmButton = {
+                          UniformButton("الانتقال للتحديث") {
+                              availableUpdateName = null
+                              tab = 4
+                          }
+                      },
+                      dismissButton = {
+                          TextButton(onClick = { availableUpdateName = null }) {
+                              Text("لاحقاً", color = Color.LightGray)
+                          }
+                      },
+                      containerColor = MaterialTheme.colorScheme.surface,
+                      titleContentColor = Color.White,
+                      textContentColor = Color.White
+                  )
+              }
+
               if (isWide) {
                   Row(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                       Card(
-                          modifier = Modifier.width(240.dp).fillMaxHeight(),
+                          modifier = Modifier.width(250.dp).fillMaxHeight(),
                           colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                           shape = RoundedCornerShape(20.dp)
                       ) {
                           Column(modifier = Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.SpaceBetween) {
                               Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                  Text("هَنَا القُرآن", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                                  Text(PrayerCalculator.getHijriDateString(), fontSize = 13.sp, color = Color.LightGray)
+                                  Text("هَنَا القُرآن", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                  Text("HANA EL Quran", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f))
+                                  Text(PrayerCalculator.getHijriDateString(), fontSize = 12.sp, color = Color.LightGray)
                                   HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp), color = Color.Gray.copy(alpha = 0.3f))
                                   TvNavButton("مواقيت الصلاة", Icons.Default.AccessTime, tab == 0) { tab = 0 }
                                   TvNavButton("القرآن والتفسير", Icons.Default.MenuBook, tab == 1) { tab = 1 }
                                   TvNavButton("إذاعة القرآن", Icons.Default.Radio, tab == 2) { tab = 2 }
                                   TvNavButton("الأذكار والقبلة", Icons.Default.Explore, tab == 3) { tab = 3 }
                                   TvNavButton("الإعدادات والتحديث", Icons.Default.Settings, tab == 4) { tab = 4 }
-                              }
-                              UniformButton("إيقاف صوت الأذان", Modifier.fillMaxWidth()) {
-                                  context.startService(Intent(context, AdhanService::class.java).apply { action = "STOP_ADHAN" })
                               }
                           }
                       }
@@ -774,22 +1021,13 @@ jobs:
                   Scaffold(
                       topBar = {
                           Row(
-                              modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 16.dp, vertical = 10.dp),
+                              modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 16.dp, vertical = 12.dp),
                               horizontalArrangement = Arrangement.SpaceBetween,
                               verticalAlignment = Alignment.CenterVertically
                           ) {
                               Column {
-                                  Text("هَنَا القُرآن", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                  Text("هَنَا القُرآن - HANA EL Quran", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                                   Text(PrayerCalculator.getHijriDateString(), fontSize = 12.sp, color = Color.LightGray)
-                              }
-                              Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                  UniformButton("تجربة الأذان") {
-                                      val i = Intent(context, AdhanService::class.java).apply { putExtra("PRAYER_NAME", "التجربة") }
-                                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(i) else context.startService(i)
-                                  }
-                                  IconButton(onClick = { context.startService(Intent(context, AdhanService::class.java).apply { action = "STOP_ADHAN" }) }) {
-                                      Icon(Icons.Default.StopCircle, contentDescription = "إيقاف", tint = Color(0xFFFF6B6B))
-                                  }
                               }
                           }
                       },
@@ -909,51 +1147,46 @@ jobs:
           @Composable
           fun RadioScreen() {
               val context = LocalContext.current
-              var playing by remember { mutableStateOf<RadioStation?>(null) }
-              var buffering by remember { mutableStateOf(false) }
-              val player = remember { MediaPlayer() }
-
-              DisposableEffect(Unit) { onDispose { try { player.stop(); player.release() } catch (_: Exception) {} } }
+              val currentUrl by MediaPlaybackService.currentUrl
+              val isPlaying by MediaPlaybackService.isPlaying
+              val isBuffering by MediaPlaybackService.isBuffering
+              val currentTitle by MediaPlaybackService.currentTitle
 
               LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
                   item {
                       Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(16.dp)) {
-                          Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-                              Text("بث إذاعات القرآن الكريم المباشر", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                              Text(
-                                  if (playing != null) (if (buffering) "جاري الاتصال ببث: ${playing!!.name}..." else "يعمل الآن: ${playing!!.name}")
-                                  else "اختر إذاعة للاستماع المباشر على مدار 24 ساعة",
-                                  fontSize = 13.sp,
-                                  color = Color.LightGray
-                              )
+                          Row(
+                              modifier = Modifier.fillMaxWidth().padding(16.dp),
+                              horizontalArrangement = Arrangement.SpaceBetween,
+                              verticalAlignment = Alignment.CenterVertically
+                          ) {
+                              Column(modifier = Modifier.weight(1f)) {
+                                  Text("بث إذاعات القرآن الكريم المباشر (يعمل بالخلفية)", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                  Text(
+                                      if (currentTitle != null) (if (isBuffering) "جاري التحميل: $currentTitle..." else "يعمل الآن في الإشعارات: $currentTitle")
+                                      else "اختر إذاعة للاستماع المباشر مع تحكم من شريط الإشعارات",
+                                      fontSize = 13.sp,
+                                      color = Color.LightGray
+                                  )
+                              }
+                              if (currentTitle != null) {
+                                  UniformButton("إيقاف") { stopMediaService(context) }
+                              }
                           }
                       }
                   }
                   items(STATIONS) { st ->
-                      val isP = playing == st
+                      val isThisStation = currentUrl == st.streamUrl
                       Card(
                           modifier = Modifier.fillMaxWidth().clickable {
-                              if (isP) {
-                                  try { player.stop() } catch (_: Exception) {}
-                                  playing = null
-                                  buffering = false
+                              if (isThisStation) {
+                                  toggleMediaService(context)
                               } else {
-                                  playing = st
-                                  buffering = true
                                   Toast.makeText(context, "جاري تشغيل: ${st.name}", Toast.LENGTH_SHORT).show()
-                                  Thread {
-                                      try {
-                                          player.reset()
-                                          player.setAudioAttributes(AudioAttributes.Builder().setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
-                                          player.setDataSource(st.streamUrl)
-                                          player.prepareAsync()
-                                          player.setOnPreparedListener { buffering = false; it.start() }
-                                          player.setOnErrorListener { _, _, _ -> buffering = false; playing = null; true }
-                                      } catch (_: Exception) { buffering = false; playing = null }
-                                  }.start()
+                                  startMediaService(context, st.streamUrl, st.name, st.subtitle)
                               }
                           },
-                          colors = CardDefaults.cardColors(containerColor = if (isP) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f) else MaterialTheme.colorScheme.surface),
+                          colors = CardDefaults.cardColors(containerColor = if (isThisStation) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f) else MaterialTheme.colorScheme.surface),
                           shape = RoundedCornerShape(14.dp)
                       ) {
                           Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -961,7 +1194,12 @@ jobs:
                                   Text(st.name, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                                   Text(st.subtitle, fontSize = 12.sp, color = Color.LightGray)
                               }
-                              Icon(if (isP) Icons.Default.PauseCircleFilled else Icons.Default.PlayCircleFilled, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(34.dp))
+                              Icon(
+                                  if (isThisStation && isPlaying) Icons.Default.PauseCircleFilled else Icons.Default.PlayCircleFilled,
+                                  null,
+                                  tint = MaterialTheme.colorScheme.primary,
+                                  modifier = Modifier.size(34.dp)
+                              )
                           }
                       }
                   }
@@ -979,11 +1217,10 @@ jobs:
               var ayahs by remember { mutableStateOf(emptyList<AyahWithTafsir>()) }
               var loading by remember { mutableStateOf(true) }
               var tafsir by remember { mutableStateOf(true) }
-              var playingAudio by remember { mutableStateOf(false) }
-              val audioPlayer = remember { MediaPlayer() }
               var bookmark by remember { mutableIntStateOf(prefs.getInt("bookmark", 1)) }
 
-              DisposableEffect(Unit) { onDispose { try { audioPlayer.stop(); audioPlayer.release() } catch (_: Exception) {} } }
+              val currentUrl by MediaPlaybackService.currentUrl
+              val isPlaying by MediaPlaybackService.isPlaying
 
               LaunchedEffect(Unit) {
                   withContext(Dispatchers.IO) {
@@ -1045,33 +1282,26 @@ jobs:
                       }
                   }
               } else {
+                  val num = String.format(Locale.US, "%03d", selSurah!!.number)
+                  val surahAudioUrl = "${RECITERS.first().serverUrl}/$num.mp3"
+                  val isThisSurahPlaying = currentUrl == surahAudioUrl && isPlaying
+
                   Column(modifier = Modifier.fillMaxSize()) {
                       Row(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                          UniformButton("الفهرس") {
-                              try { audioPlayer.stop() } catch (_: Exception) {}
-                              playingAudio = false
-                              selSurah = null
-                          }
+                          UniformButton("الفهرس") { selSurah = null }
                           Text(selSurah!!.name, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                           Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                              UniformButton(if (playingAudio) "إيقاف" else "تلاوة") {
-                                  if (playingAudio) {
-                                      try { audioPlayer.stop() } catch (_: Exception) {}
-                                      playingAudio = false
+                              UniformButton(if (isThisSurahPlaying) "إيقاف مؤقت" else "تلاوة بالخلفية") {
+                                  if (currentUrl == surahAudioUrl) {
+                                      toggleMediaService(context)
                                   } else {
-                                      val num = String.format(Locale.US, "%03d", selSurah!!.number)
-                                      val url = "${RECITERS.first().serverUrl}/$num.mp3"
-                                      Toast.makeText(context, "جاري تشغيل التلاوة...", Toast.LENGTH_SHORT).show()
-                                      Thread {
-                                          try {
-                                              audioPlayer.reset()
-                                              audioPlayer.setDataSource(url)
-                                              audioPlayer.prepare()
-                                              audioPlayer.start()
-                                              playingAudio = true
-                                              audioPlayer.setOnCompletionListener { playingAudio = false }
-                                          } catch (_: Exception) {}
-                                      }.start()
+                                      Toast.makeText(context, "جاري تشغيل ${selSurah!!.name} في الخلفية...", Toast.LENGTH_SHORT).show()
+                                      startMediaService(
+                                          context = context,
+                                          url = surahAudioUrl,
+                                          title = "تلاوة ${selSurah!!.name}",
+                                          subtitle = "القارئ: ${RECITERS.first().name}"
+                                      )
                                   }
                               }
                               UniformButton(if (tafsir) "إخفاء التفسير" else "التفسير") { tafsir = !tafsir }
@@ -1203,13 +1433,11 @@ jobs:
               val scope = rememberCoroutineScope()
 
               var updateProgress by remember { mutableFloatStateOf(-1f) }
-              var stat by remember { mutableStateOf("الإصدار الحالي: v4.1 (تحديث داخلي مباشر بدون حذف)") }
+              var stat by remember { mutableStateOf("الإصدار الحالي: v$CURRENT_APP_VERSION") }
               var adhanUrl by remember { mutableStateOf(prefs.getString("adhan_url", ADHANS.first().second)!!) }
               var calcMethod by remember { mutableIntStateOf(prefs.getInt("calc_method", 0)) }
-              var isHanafi by remember { mutableStateOf(prefs.getBoolean("madhab_hanafi", false)) }
 
               LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
-                  // 1. التحديث المباشر داخل التطبيق دون الاعتماد على DownloadManager الخارجي
                   item {
                       Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(16.dp)) {
                           Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1224,7 +1452,7 @@ jobs:
                                       context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")))
                                       return@UniformButton
                                   }
-                                  stat = "جاري تحميل التحديث داخل التطبيق..."
+                                  stat = "جاري تحميل التحديث..."
                                   updateProgress = 0.05f
                                   scope.launch(Dispatchers.IO) {
                                       try {
@@ -1250,7 +1478,7 @@ jobs:
                                           }
                                           withContext(Dispatchers.Main) {
                                               updateProgress = -1f
-                                              stat = "اكتمل التحميل! جاري تثبيت التحديث على نفس الحزمة..."
+                                              stat = "الإصدار الحالي: v$CURRENT_APP_VERSION"
                                               val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", apkFile)
                                               val installIntent = Intent(Intent.ACTION_VIEW).apply {
                                                   setDataAndType(uri, "application/vnd.android.package-archive")
@@ -1270,11 +1498,11 @@ jobs:
                       }
                   }
 
-                  // 2. اختيار صوت المؤذن (أذان المحور مدمج ويعمل فوراً)
+                  // قسم اختيار صوت المؤذن + تجربة الأذان والزر الأحمر للإيقاف داخل الإعدادات
                   item {
                       Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(16.dp)) {
                           Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                              Text("اختيار صوت المؤذن", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                              Text("اختيار صوت المؤذن وتجربته", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                               ADHANS.forEach { (name, u) ->
                                   Row(
                                       modifier = Modifier.fillMaxWidth().clickable {
@@ -1290,20 +1518,30 @@ jobs:
                                       Text(name, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                                   }
                               }
-                              Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                  UniformButton("تشغيل الأذان الآن", Modifier.weight(1f)) {
+                              Row(
+                                  horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                  verticalAlignment = Alignment.CenterVertically,
+                                  modifier = Modifier.fillMaxWidth()
+                              ) {
+                                  UniformButton("تجربة الأذان", Modifier.weight(1f)) {
                                       val i = Intent(context, AdhanService::class.java).apply { putExtra("PRAYER_NAME", "التجربة") }
                                       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(i) else context.startService(i)
                                   }
-                                  UniformButton("إيقاف الصوت", Modifier.weight(1f)) {
-                                      context.startService(Intent(context, AdhanService::class.java).apply { action = "STOP_ADHAN" })
+                                  Button(
+                                      onClick = { context.startService(Intent(context, AdhanService::class.java).apply { action = "STOP_ADHAN" }) },
+                                      colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F), contentColor = Color.White),
+                                      shape = RoundedCornerShape(12.dp),
+                                      modifier = Modifier.weight(1f)
+                                  ) {
+                                      Icon(Icons.Default.StopCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                                      Spacer(Modifier.width(6.dp))
+                                      Text("إيقاف الأذان", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                   }
                               }
                           }
                       }
                   }
 
-                  // 3. إعدادات الشكل والألوان وحجم الخط (خط مستقيم متناسق بدون تقطيع الكلمات)
                   item {
                       Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(16.dp)) {
                           Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1325,7 +1563,6 @@ jobs:
                       }
                   }
 
-                  // 4. طريقة الحساب والعمل في الخلفية
                   item {
                       Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(16.dp)) {
                           Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1361,7 +1598,7 @@ jobs:
           }
           EOF
 
-      - name: Generate and Persist Keystore (Fixed Signature for Seamless Updates)
+      - name: Generate and Persist Keystore
         env:
           KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASSWORD || 'AlHana2026Secure' }}
         run: |
@@ -1398,7 +1635,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: "هَنَا القُرآن (v4.1 Signed Release)"
+          name: "هَنَا القُرآن - HANA EL Quran (v5.0)"
           files: app/build/outputs/apk/release/alhana.quran.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
