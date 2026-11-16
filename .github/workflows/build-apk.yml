@@ -71,7 +71,7 @@ jobs:
           }
           EOF
 
-          # 4. جلب ملفات الصوات المدمجة
+          # 4. جلب ملفات الأصوات المدمجة (الأذان والصلوات)
           find . -maxdepth 3 -name "azan_012*.mp3" -exec cp {} app/src/main/res/raw/adhan.mp3 \; || true
           find . -maxdepth 3 -name "salawat*.mp3" ! -path "./app/src/main/res/raw/salawat.mp3" -exec cp {} app/src/main/res/raw/salawat.mp3 \; || true
           find . -maxdepth 3 -name "salawt2*.mp3" ! -path "./app/src/main/res/raw/salawt2.mp3" -exec cp {} app/src/main/res/raw/salawt2.mp3 \; || true
@@ -140,7 +140,7 @@ jobs:
           </adaptive-icon>
           EOF
 
-          # 6. ملف build.gradle.kts وتخفيف الحجم
+          # 6. إعداد app/build.gradle.kts وتخفيف الحجم
           cat << 'EOF' > app/build.gradle.kts
           plugins {
               id("com.android.application")
@@ -268,7 +268,7 @@ jobs:
           </manifest>
           EOF
 
-          # 8. ملفات الـ Repository والخدمات
+          # 8. ملفات الـ Repository والخدمات (مع استيراد Context و Intent بدقة)
           cat << 'EOF' > app/src/main/java/com/hona/alquran/IslamicRepository.kt
           package com.hona.alquran
           data class CityLocation(val name: String, val lat: Double, val lng: Double)
@@ -301,7 +301,7 @@ jobs:
                   IslamicArticle("أصحاب الكهف", "سورة الكهف", "فتية آمنوا بربهم فنجاهم الله.")
               )
               val QURAN_RULES = listOf(
-                  IslamicArticle("آاداب التلاوة", "أحكام التجويد", "الوضوء والخشوع وتدبر المعاني.")
+                  IslamicArticle("آداب التلاوة", "أحكام التجويد", "الوضوء والخشوع وتدبر المعاني.")
               )
           }
           EOF
@@ -423,11 +423,15 @@ jobs:
           }
           EOF
 
+          # تصحيح ملف AdhanService.kt مع استيراد Context و Intent بدقة تامة
           cat << 'EOF' > app/src/main/java/com/hona/alquran/service/AdhanService.kt
           package com.hona.alquran.service
+
           import android.app.Service
+          import android.content.Context
           import android.content.Intent
           import android.os.IBinder
+
           class AdhanService : Service() {
               override fun onBind(intent: Intent?): IBinder? = null
               override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_NOT_STICKY
@@ -437,7 +441,7 @@ jobs:
           }
           EOF
 
-          # 9. MainActivity.kt النظيف والخالي من أخطاء الترجمة
+          # 9. MainActivity.kt النظيف
           cat << 'EOF' > app/src/main/java/com/hona/alquran/MainActivity.kt
           package com.hona.alquran
 
