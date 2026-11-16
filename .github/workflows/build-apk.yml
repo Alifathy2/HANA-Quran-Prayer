@@ -1,4 +1,4 @@
-name: Build Signed Release APK (HANA EL Quran v7.3)
+name: Build Signed Release APK (HANA EL Quran v7.4)
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Clean Old Files & Generate v7.3 Project
+      - name: Clean Old Files & Generate v7.4 Project
         run: |
           rm -rf app/src/main/java
           rm -rf app/src/main/res/layout
@@ -173,8 +173,8 @@ jobs:
                   applicationId = "alhana.quran"
                   minSdk = 24
                   targetSdk = 33
-                  versionCode = 23
-                  versionName = "7.3"
+                  versionCode = 24
+                  versionName = "7.4"
                   resourceConfigurations += setOf("ar", "en")
               }
 
@@ -266,6 +266,7 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
               <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
               <uses-feature android:name="android.software.leanback" android:required="false" />
               <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
@@ -2658,8 +2659,8 @@ jobs:
           import java.net.URL
           import java.util.*
 
-          const val CURRENT_APP_VERSION = "7.3"
-          const val CURRENT_VERSION_CODE = 23
+          const val CURRENT_APP_VERSION = "7.4"
+          const val CURRENT_VERSION_CODE = 24
 
           data class SurahInfo(val number: Int, val name: String, val ayahsCount: Int)
           data class AyahWithTafsir(val numberInSurah: Int, val text: String, val tafsir: String)
@@ -2721,17 +2722,56 @@ jobs:
           }
 
           fun triggerDirectDownloadUpdate(context: Context) {
-              val apkUrl = "https://github.com/Alifathy2/HANA-Quran-Prayer/releases/latest/download/alhana.quran.apk"
+              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !context.packageManager.canRequestPackageInstalls()) {
+                  Toast.makeText(context, "يرجى تفعيل إذن (تثبيت التطبيقات غير المعروفة) ثم الضغط على تحديث مرة أخرى", Toast.LENGTH_LONG).show()
+                  val intent = Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
+                  context.startActivity(intent)
+                  return
+              }
+
+              val ts = System.currentTimeMillis()
+              val apkUrl = "https://github.com/Alifathy2/HANA-Quran-Prayer/releases/latest/download/alhana.quran.apk?t=$ts"
+              val fileName = "alhana-quran-$ts.apk"
+
               try {
                   val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
                   val req = DownloadManager.Request(Uri.parse(apkUrl))
                       .setTitle("تحديث تطبيق هَنَا القُرآن")
-                      .setDescription("جاري تنزيل التحديث الرسمي...")
+                      .setDescription("جاري تنزيل الإصدار الجديد...")
+                      .setMimeType("application/vnd.android.package-archive")
                       .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                      .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "alhana-update.apk")
+                      .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
                       .setAllowedOverMetered(true)
-                  dm.enqueue(req)
-                  Toast.makeText(context, "بدأ تنزيل التحديث في شريط الإشعارات، اضغط عليه عند اكتماله للتثبيت.", Toast.LENGTH_LONG).show()
+
+                  val downloadId = dm.enqueue(req)
+                  Toast.makeText(context, "جاري تحميل التحديث... ستفتح شاشة التثبيت تلقائياً فور الانتهاء", Toast.LENGTH_LONG).show()
+
+                  val onComplete = object : android.content.BroadcastReceiver() {
+                      override fun onReceive(ctxt: Context, intent: Intent) {
+                          val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
+                          if (id == downloadId) {
+                              try {
+                                  ctxt.unregisterReceiver(this)
+                                  val uri = dm.getUriForDownloadedFile(downloadId)
+                                  if (uri != null) {
+                                      val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                                          setDataAndType(uri, "application/vnd.android.package-archive")
+                                          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                      }
+                                      ctxt.startActivity(installIntent)
+                                  }
+                              } catch (_: Exception) {
+                                  Toast.makeText(ctxt, "اكتمل التحميل، افتح الإشعار لتثبيت التحديث", Toast.LENGTH_LONG).show()
+                              }
+                          }
+                      }
+                  }
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                      context.registerReceiver(onComplete, android.content.IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE), Context.RECEIVER_EXPORTED)
+                  } else {
+                      context.registerReceiver(onComplete, android.content.IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
+                  }
               } catch (_: Exception) {
                   context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl)))
               }
@@ -3107,7 +3147,7 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/alhana.quran.apk
           cp app/build/outputs/bundle/release/app-release.aab app/build/outputs/apk/release/alhana.aab || true
           cat << 'EOF' > app/build/outputs/apk/release/version.json
-          {"versionCode": 23, "versionName": "7.3"}
+          {"versionCode": 24, "versionName": "7.4"}
           EOF
 
       - name: Upload Signed APK & Play Store Bundle to Artifacts
@@ -3125,7 +3165,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: "هَنَا القُرآن - HANA EL Quran (v7.3)"
+          name: "هَنَا القُرآن - HANA EL Quran (v7.4)"
           files: |
             app/build/outputs/apk/release/alhana.quran.apk
             app/build/outputs/apk/release/version.json
