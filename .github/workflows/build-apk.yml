@@ -1,4 +1,4 @@
-name: Build Signed Release APK (HANA EL Quran v7.4)
+name: Build Signed Release APK (HANA EL Quran v7.5)
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Clean Old Files & Generate v7.4 Project
+      - name: Clean Old Files & Generate v7.5 Project
         run: |
           rm -rf app/src/main/java
           rm -rf app/src/main/res/layout
@@ -70,6 +70,7 @@ jobs:
           mkdir -p app/src/main/res/drawable
           mkdir -p app/src/main/res/mipmap-anydpi-v26
           mkdir -p app/src/main/res/raw
+          mkdir -p app/src/main/res/xml
           mkdir -p app/src/main/java/com/hona/alquran/service
           mkdir -p app/src/main/java/com/hona/alquran/data
           mkdir -p app/src/main/java/com/hona/alquran/ui
@@ -173,8 +174,8 @@ jobs:
                   applicationId = "alhana.quran"
                   minSdk = 24
                   targetSdk = 33
-                  versionCode = 24
-                  versionName = "7.4"
+                  versionCode = 25
+                  versionName = "7.5"
                   resourceConfigurations += setOf("ar", "en")
               }
 
@@ -244,12 +245,20 @@ jobs:
           -dontwarn com.batoulapps.adhan.**
           EOF
 
-          # 8. إعداد themes.xml
+          # 8. إعداد themes.xml و file_paths.xml للـ FileProvider
           cat << 'EOF' > app/src/main/res/values/themes.xml
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
               <style name="Theme.HonaAlQuran" parent="android:Theme.Material.NoActionBar" />
           </resources>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/xml/file_paths.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <paths>
+              <external-path name="external_files" path="." />
+              <files-path name="internal_files" path="." />
+          </paths>
           EOF
 
           # 9. إعداد AndroidManifest.xml
@@ -310,6 +319,16 @@ jobs:
                       android:name=".service.AdhanService"
                       android:enabled="true"
                       android:exported="false" />
+
+                  <provider
+                      android:name="androidx.core.content.FileProvider"
+                      android:authorities="${applicationId}.provider"
+                      android:exported="false"
+                      android:grantUriPermissions="true">
+                      <meta-data
+                          android:name="android.support.FILE_PROVIDER_PATHS"
+                          android:resource="@xml/file_paths" />
+                  </provider>
               </application>
           </manifest>
           EOF
@@ -2590,7 +2609,7 @@ jobs:
                                               Toast.makeText(context, "التطبيق على آخر إصدار بالفعل (v$CURRENT_APP_VERSION)", Toast.LENGTH_LONG).show()
                                           } else {
                                               updateCheckStatus = "يتوفر إصدار جديد (v$remoteVerName) - جاري التحميل..."
-                                              triggerDirectDownloadUpdate(context)
+                                              triggerDirectDownloadUpdate(context, "v$remoteVerName")
                                           }
                                       }
                                   }
@@ -2659,8 +2678,8 @@ jobs:
           import java.net.URL
           import java.util.*
 
-          const val CURRENT_APP_VERSION = "7.4"
-          const val CURRENT_VERSION_CODE = 24
+          const val CURRENT_APP_VERSION = "7.5"
+          const val CURRENT_VERSION_CODE = 25
 
           data class SurahInfo(val number: Int, val name: String, val ayahsCount: Int)
           data class AyahWithTafsir(val numberInSurah: Int, val text: String, val tafsir: String)
@@ -2721,56 +2740,81 @@ jobs:
               if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(si) else context.startService(si)
           }
 
-          fun triggerDirectDownloadUpdate(context: Context) {
+          fun installApkFile(context: Context, file: java.io.File) {
+              try {
+                  val uri = androidx.core.content.FileProvider.getUriForFile(
+                      context,
+                      "${context.packageName}.provider",
+                      file
+                  )
+                  val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                      setDataAndType(uri, "application/vnd.android.package-archive")
+                      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                  }
+                  context.startActivity(installIntent)
+              } catch (_: Exception) {
+                  Toast.makeText(context, "افتح مجلد التنزيلات (Downloads) واضغط على ${file.name}", Toast.LENGTH_LONG).show()
+              }
+          }
+
+          fun triggerDirectDownloadUpdate(context: Context, targetVersion: String = "latest") {
               if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !context.packageManager.canRequestPackageInstalls()) {
-                  Toast.makeText(context, "يرجى تفعيل إذن (تثبيت التطبيقات غير المعروفة) ثم الضغط على تحديث مرة أخرى", Toast.LENGTH_LONG).show()
+                  Toast.makeText(context, "فعّل إذن (تثبيت التطبيقات غير المعروفة) ثم ارجع واضغط تحديث", Toast.LENGTH_LONG).show()
                   val intent = Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
                   context.startActivity(intent)
                   return
               }
 
+              val cleanVer = targetVersion.replace(Regex("[^a-zA-Z0-9._-]"), "").ifEmpty { "latest" }
+              val fileName = "alhana-quran-$cleanVer.apk"
+              val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+              val existingFile = java.io.File(downloadsDir, fileName)
+
+              // 1. إذا كان نفس الإصدار محمّل مسبقاً وحجمه سليم -> افتح التثبيت فوراً دون إعادة التحميل
+              if (existingFile.exists() && existingFile.length() > 1_000_000L) {
+                  Toast.makeText(context, "التحديث محمّل بالفعل! جاري فتح شاشة التثبيت مباشرة...", Toast.LENGTH_SHORT).show()
+                  installApkFile(context, existingFile)
+                  return
+              }
+
               val ts = System.currentTimeMillis()
               val apkUrl = "https://github.com/Alifathy2/HANA-Quran-Prayer/releases/latest/download/alhana.quran.apk?t=$ts"
-              val fileName = "alhana-quran-$ts.apk"
 
               try {
                   val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
                   val req = DownloadManager.Request(Uri.parse(apkUrl))
-                      .setTitle("تحديث تطبيق هَنَا القُرآن")
-                      .setDescription("جاري تنزيل الإصدار الجديد...")
+                      .setTitle("تحديث هَنَا القُرآن ($cleanVer)")
+                      .setDescription("جاري تنزيل التحديث...")
                       .setMimeType("application/vnd.android.package-archive")
                       .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                       .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
                       .setAllowedOverMetered(true)
 
                   val downloadId = dm.enqueue(req)
-                  Toast.makeText(context, "جاري تحميل التحديث... ستفتح شاشة التثبيت تلقائياً فور الانتهاء", Toast.LENGTH_LONG).show()
+                  Toast.makeText(context, "بدأ تحميل التحديث لأول مرة... سيفتح التثبيت تلقائياً فور الانتهاء", Toast.LENGTH_LONG).show()
 
-                  val onComplete = object : android.content.BroadcastReceiver() {
-                      override fun onReceive(ctxt: Context, intent: Intent) {
-                          val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
-                          if (id == downloadId) {
-                              try {
-                                  ctxt.unregisterReceiver(this)
-                                  val uri = dm.getUriForDownloadedFile(downloadId)
-                                  if (uri != null) {
-                                      val installIntent = Intent(Intent.ACTION_VIEW).apply {
-                                          setDataAndType(uri, "application/vnd.android.package-archive")
-                                          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                      }
-                                      ctxt.startActivity(installIntent)
+                  // مراقبة التحميل عبر Coroutine لضمان فتح التثبيت تلقائياً على هواتف سامسونج
+                  CoroutineScope(Dispatchers.IO).launch {
+                      var downloading = true
+                      while (downloading) {
+                          val q = DownloadManager.Query().setFilterById(downloadId)
+                          val cursor = dm.query(q)
+                          if (cursor != null && cursor.moveToFirst()) {
+                              val statusIdx = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
+                              val status = if (statusIdx >= 0) cursor.getInt(statusIdx) else -1
+                              if (status == DownloadManager.STATUS_SUCCESSFUL) {
+                                  downloading = false
+                                  withContext(Dispatchers.Main) {
+                                      installApkFile(context, existingFile)
                                   }
-                              } catch (_: Exception) {
-                                  Toast.makeText(ctxt, "اكتمل التحميل، افتح الإشعار لتثبيت التحديث", Toast.LENGTH_LONG).show()
+                              } else if (status == DownloadManager.STATUS_FAILED) {
+                                  downloading = false
                               }
                           }
+                          cursor?.close()
+                          delay(1000L)
                       }
-                  }
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                      context.registerReceiver(onComplete, android.content.IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE), Context.RECEIVER_EXPORTED)
-                  } else {
-                      context.registerReceiver(onComplete, android.content.IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
                   }
               } catch (_: Exception) {
                   context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl)))
@@ -2949,7 +2993,7 @@ jobs:
                       confirmButton = {
                           UniformButton("تحديث الآن") {
                               availableUpdateName = null
-                              triggerDirectDownloadUpdate(context)
+                              triggerDirectDownloadUpdate(context, availableUpdateName ?: "latest")
                           }
                       },
                       dismissButton = {
@@ -3012,7 +3056,7 @@ jobs:
                                       color = Color(0xFF06281E),
                                       fontWeight = FontWeight.Bold,
                                       fontSize = 13.sp,
-                                      modifier = Modifier.weight(1f).clickable { triggerDirectDownloadUpdate(context) }
+                                      modifier = Modifier.weight(1f).clickable { triggerDirectDownloadUpdate(context, availableUpdateName ?: "latest") }
                                   )
                                   IconButton(onClick = { showUpdateBanner = false }, modifier = Modifier.size(26.dp)) {
                                       Icon(Icons.Default.Close, contentDescription = "إغلاق", tint = Color(0xFF06281E))
@@ -3147,7 +3191,7 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/alhana.quran.apk
           cp app/build/outputs/bundle/release/app-release.aab app/build/outputs/apk/release/alhana.aab || true
           cat << 'EOF' > app/build/outputs/apk/release/version.json
-          {"versionCode": 24, "versionName": "7.4"}
+          {"versionCode": 25, "versionName": "7.5"}
           EOF
 
       - name: Upload Signed APK & Play Store Bundle to Artifacts
@@ -3165,7 +3209,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: "هَنَا القُرآن - HANA EL Quran (v7.4)"
+          name: "هَنَا القُرآن - HANA EL Quran (v7.5)"
           files: |
             app/build/outputs/apk/release/alhana.quran.apk
             app/build/outputs/apk/release/version.json
