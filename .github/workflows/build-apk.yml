@@ -1,4 +1,4 @@
-name: Build Signed Release APK (HANA EL Quran v7.3)
+name: Build Signed Release APK (HANA EL Quran v8.0)
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Clean Old Files & Generate v7.3 Project
+      - name: Clean Old Files & Generate v8.0 Project
         run: |
           rm -rf app/src/main/java
           rm -rf app/src/main/res/layout
@@ -144,7 +144,7 @@ jobs:
           </adaptive-icon>
           EOF
 
-          # 7. إعداد app/build.gradle.kts
+          # 7. إعداد app/build.gradle.kts (الإصدار 8.0)
           cat << 'EOF' > app/build.gradle.kts
           plugins {
               id("com.android.application")
@@ -159,8 +159,8 @@ jobs:
                   applicationId = "alhana.quran"
                   minSdk = 24
                   targetSdk = 33
-                  versionCode = 23
-                  versionName = "7.3"
+                  versionCode = 24
+                  versionName = "8.0"
                   resourceConfigurations += setOf("ar", "en")
               }
 
@@ -427,7 +427,7 @@ jobs:
           }
           EOF
 
-          # 12. ملفات الخدمات والمحركات (AudioEngine.kt, AdhanScheduler.kt, AdhanReceiver.kt, AdhanService.kt)
+          # 12. ملفات الخدمات والمحركات (AudioEngine.kt)
           cat << 'EOF' > app/src/main/java/com/hona/alquran/service/AudioEngine.kt
           package com.hona.alquran.service
 
@@ -540,6 +540,7 @@ jobs:
           }
           EOF
 
+          # 13. ملف AdhanScheduler.kt
           cat << 'EOF' > app/src/main/java/com/hona/alquran/service/AdhanScheduler.kt
           package com.hona.alquran.service
 
@@ -594,6 +595,7 @@ jobs:
           }
           EOF
 
+          # 14. ملف AdhanReceiver.kt
           cat << 'EOF' > app/src/main/java/com/hona/alquran/service/AdhanReceiver.kt
           package com.hona.alquran.service
 
@@ -640,7 +642,7 @@ jobs:
           }
           EOF
 
-          # تصحيح دقيق لـ AdhanService.kt مع استيراد Context و Intent بدقة
+          # 15. ملف AdhanService.kt (مع استيراد AudioManager بدقة تامة)
           cat << 'EOF' > app/src/main/java/com/hona/alquran/service/AdhanService.kt
           package com.hona.alquran.service
 
@@ -723,7 +725,7 @@ jobs:
           }
           EOF
 
-          # 17. الواجهة الشاملة (MainActivity.kt) مع الاستيرادات السليمة ودعم الأزرار
+          # 16. ملف MainActivity.kt (مع استيراد AudioManager بدقة تامة)
           cat << 'EOF' > app/src/main/java/com/hona/alquran/MainActivity.kt
           package com.hona.alquran
 
@@ -731,6 +733,7 @@ jobs:
           import android.annotation.SuppressLint
           import android.app.*
           import android.content.*
+          import android.media.AudioManager
           import android.hardware.*
           import android.net.Uri
           import android.os.*
@@ -776,8 +779,8 @@ jobs:
           import java.text.SimpleDateFormat
           import java.util.*
 
-          const val CURRENT_APP_VERSION = "7.3"
-          const val CURRENT_VERSION_CODE = 23
+          const val CURRENT_APP_VERSION = "8.0"
+          const val CURRENT_VERSION_CODE = 24
 
           data class SurahInfo(val number: Int, val name: String, val ayahsCount: Int)
           data class AyahWithTafsir(val numberInSurah: Int, val text: String, val tafsir: String)
@@ -942,7 +945,7 @@ jobs:
 
           @Composable
           fun CompassView() {
-              Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+              Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Alignment.Center) {
                   Text("بوصلة اتجاه القبلة", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                   Spacer(Modifier.height(20.dp))
                   Box(modifier = Modifier.size(200.dp).background(MaterialTheme.colorScheme.surface, CircleShape).border(4.dp, MaterialTheme.colorScheme.primary, CircleShape), contentAlignment = Alignment.Center) {
@@ -974,26 +977,35 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Build Signed Release APK & Play Store AAB
+      - name: Build Signed Release APK & Play Store AAB + Version JSON
         env:
           KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASSWORD || 'AlHana2026Secure' }}
         run: |
           gradle assembleRelease bundleRelease -Pandroid.useAndroidX=true -Pandroid.enableJetifier=true --stacktrace
           cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/alhana.quran.apk
+          cp app/build/outputs/bundle/release/app-release.aab app/build/outputs/apk/release/alhana.aab || true
+          cat << 'EOF' > app/build/outputs/apk/release/version.json
+          {"versionCode": 24, "versionName": "8.0"}
+          EOF
 
-      - name: Upload APK to Artifacts
+      - name: Upload Signed APK & Play Store Bundle to Artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Hona-AlQuran-APK
-          path: app/build/outputs/apk/release/alhana.quran.apk
+          path: |
+            app/build/outputs/apk/release/alhana.quran.apk
+            app/build/outputs/apk/release/alhana.aab
+            app/build/outputs/apk/release/version.json
 
       - name: Publish Direct OTA Release on GitHub
         if: always()
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: "هَنَا القُرآن - HANA EL Quran (v7.3)"
-          files: app/build/outputs/apk/release/alhana.quran.apk
+          name: "هَنَا القُرآن - HANA EL Quran (v8.0)"
+          files: |
+            app/build/outputs/apk/release/alhana.quran.apk
+            app/build/outputs/apk/release/version.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
