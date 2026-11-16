@@ -1,4 +1,4 @@
-name: Build Signed Release APK (HANA EL Quran v7.8)
+name: Build Signed Release APK (HANA EL Quran v8.0)
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Clean Old Files & Generate v7.8 Project
+      - name: Clean Old Files & Generate v8.0 Project
         run: |
           rm -rf app/src/main/java
           rm -rf app/src/main/res/layout
@@ -65,15 +65,13 @@ jobs:
           }
           EOF
 
-          # 4. إنشاء هيكل المجلدات المقسمة (Modular Structure)
+          # 4. إنشاء مجلد المصدر الموحد
           mkdir -p app/src/main/res/values
           mkdir -p app/src/main/res/drawable
           mkdir -p app/src/main/res/mipmap-anydpi-v26
           mkdir -p app/src/main/res/raw
           mkdir -p app/src/main/res/xml
-          mkdir -p app/src/main/java/com/hona/alquran/service
-          mkdir -p app/src/main/java/com/hona/alquran/data
-          mkdir -p app/src/main/java/com/hona/alquran/ui
+          mkdir -p app/src/main/java/com/hona/alquran
 
           # 5. جلب ملف صوت أذان المحور المرفق (adhan.mp3)
           find . -maxdepth 3 -name "azan_012*.mp3" -exec cp {} app/src/main/res/raw/adhan.mp3 \; || true
@@ -95,7 +93,7 @@ jobs:
             fi
           fi
 
-          # 5-ب. نسخ الصوت الأول salawat.mp3 والصوت الثاني المرفوع salawt2.mp3 إلى res/raw
+          # 5-ب. نسخ الصوت الأول والثاني إلى res/raw
           find . -maxdepth 3 -name "salawat.mp3" ! -path "./app/src/main/res/raw/salawat.mp3" -exec cp {} app/src/main/res/raw/salawat.mp3 \; || true
           if [ ! -s app/src/main/res/raw/salawat.mp3 ]; then
             python3 -c '
@@ -108,7 +106,6 @@ jobs:
           ' || true
           fi
 
-          # نسخ الصوت الثاني المرفوع باسم salawt2.mp3
           find . -maxdepth 3 \( -name "salawt2.mp3" -o -name "salawat2.mp3" \) ! -path "./app/src/main/res/raw/*" -exec cp {} app/src/main/res/raw/salawt2.mp3 \; || true
           if [ ! -s app/src/main/res/raw/salawt2.mp3 ]; then
             python3 -c '
@@ -174,8 +171,8 @@ jobs:
                   applicationId = "alhana.quran"
                   minSdk = 24
                   targetSdk = 33
-                  versionCode = 28
-                  versionName = "7.8"
+                  versionCode = 30
+                  versionName = "8.0"
                   resourceConfigurations += setOf("ar", "en")
               }
 
@@ -306,18 +303,19 @@ jobs:
                       </intent-filter>
                   </activity>
 
-                  <receiver android:name=".service.AdhanReceiver" android:enabled="true" android:exported="false" />
-                  <receiver android:name=".service.SalawatReceiver" android:enabled="true" android:exported="false" />
-                  <receiver android:name=".service.MediaActionReceiver" android:enabled="true" android:exported="false" />
-                  <receiver android:name=".service.BootReceiver" android:enabled="true" android:exported="true">
+                  <receiver android:name=".AdhanReceiver" android:enabled="true" android:exported="false" />
+                  <receiver android:name=".SalawatReceiver" android:enabled="true" android:exported="false" />
+                  <receiver android:name=".MediaActionReceiver" android:enabled="true" android:exported="false" />
+                  <receiver android:name=".BootReceiver" android:enabled="true" android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.BOOT_COMPLETED" />
                           <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                       </intent-filter>
                   </receiver>
+                  <receiver android:name=".SalawatKeepAliveService" android:enabled="true" android:exported="false" />
 
                   <service
-                      android:name=".service.AdhanService"
+                      android:name=".AdhanService"
                       android:enabled="true"
                       android:exported="false"
                       android:foregroundServiceType="mediaPlayback" />
@@ -335,21 +333,83 @@ jobs:
           </manifest>
           EOF
 
-          # 10. ملف البيانات (data/IslamicRepository.kt)
-          cat << 'EOF' > app/src/main/java/com/hona/alquran/data/IslamicRepository.kt
-          package com.hona.alquran.data
+          # 10. تجميع كافة ملفات الكود والشاشات والخدمات في MainActivity.kt ضمن حزمة com.hona.alquran بدون أي استيرادات مفقودة أو حزم فرعية
+          cat << 'EOF' > app/src/main/java/com/hona/alquran/MainActivity.kt
+          package com.hona.alquran
+
+          import android.Manifest
+          import android.annotation.SuppressLint
+          import android.app.AlarmManager
+          import android.app.DownloadManager
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.PendingIntent
+          import android.app.Service
+          import android.content.BroadcastReceiver
+          import android.content.Context
+          import android.content.Intent
+          import android.content.IntentFilter
+          import android.hardware.*
+          import android.media.AudioAttributes
+          import android.media.AudioManager
+          import android.media.MediaPlayer
+          import android.media.RingtoneManager
+          import android.net.Uri
+          import android.os.*
+          import android.provider.Settings
+          import android.speech.tts.TextToSpeech
+          import android.widget.Toast
+          import androidx.activity.ComponentActivity
+          import androidx.activity.compose.rememberLauncherForActivityResult
+          import androidx.activity.compose.setContent
+          import androidx.activity.result.contract.ActivityResultContracts
+          import androidx.compose.animation.*
+          import androidx.compose.animation.core.*
+          import androidx.compose.foundation.*
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.lazy.*
+          import androidx.compose.foundation.shape.*
+          import androidx.compose.material.icons.Icons
+          import androidx.compose.material.icons.filled.*
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.draw.scale
+          import androidx.compose.ui.focus.onFocusChanged
+          import androidx.compose.ui.geometry.Offset
+          import androidx.compose.ui.geometry.Size
+          import androidx.compose.ui.graphics.*
+          import androidx.compose.ui.graphics.drawscope.Stroke
+          import androidx.compose.ui.graphics.drawscope.rotate
+          import androidx.compose.ui.platform.*
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.text.style.TextAlign
+          import androidx.compose.ui.text.style.TextOverflow
+          import androidx.compose.ui.unit.*
+          import androidx.core.app.NotificationCompat
+          import com.google.android.gms.location.LocationServices
+          import kotlinx.coroutines.*
+          import org.json.JSONObject
+          import java.io.File
+          import java.net.HttpURLConnection
+          import java.net.URL
+          import java.net.URLEncoder
+          import java.text.SimpleDateFormat
+          import java.util.*
+
+          const val CURRENT_APP_VERSION = "8.0"
+          const val CURRENT_VERSION_CODE = 30
 
           data class CityLocation(val name: String, val lat: Double, val lng: Double)
-          data class HadithItem(
-              val title: String,
-              val narrator: String,
-              val source: String,
-              val text: String,
-              val explanation: String,
-              val lessons: String
-          )
+          data class HadithItem(val title: String, val narrator: String, val source: String, val text: String, val explanation: String, val lessons: String)
           data class IslamicArticle(val title: String, val subtitle: String, val content: String)
           data class SurahMetaInfo(val revelationTypeAr: String, val reasonOfRevelation: String, val virtuesAndTheme: String)
+          data class SurahInfo(val number: Int, val name: String, val ayahsCount: Int)
+          data class AyahWithTafsir(val numberInSurah: Int, val text: String, val tafsir: String)
+          data class ZikrItem(val category: String, val text: String, val benefit: String, val targetCount: Int)
+          data class Reciter(val name: String, val serverUrl: String)
+          data class RadioStation(val name: String, val subtitle: String, val streamUrl: String)
 
           object IslamicRepository {
               val EGYPT_AND_ARAB_CITIES = listOf(
@@ -390,7 +450,7 @@ jobs:
               }
 
               val HADITH_LIST = listOf(
-                  HadithItem("1. إنما الأعمال بالنيات", "عمر بن الخطاب رضي الله عنه", "صحيح البخاري (1) وصحيح مسلم (1907)", "عَنْ أَمِيرِ الْمُؤْمِنِينَ أَبِي حَفْصٍ عُمَرَ بْنِ الْخَطَّابِ رَضِيَ اللهُ عَنْهُ قَالَ: سَمِعْتُ رَسُولَ اللَّهِ ﷺ يَقُولُ: «إِنَّمَا الْأَعْمَالُ بِالنِّيَّاتِ، وَإِنَّمَا لِكُلِّ امْرِئٍ مَا نَوَى».", "هذا الحديث قاعدة عظيمة من قواعد الإسلام وعليه مدار قبول الأعمال.", "• وجوب إخلاص النية لله في كل قول وعمل."),
+                  HadithItem("1. إنما الأعمال بالنيات", "عمر بن الخطاب رضي الله عنه", "صحيح البخاري (1) ومسلم (1907)", "عَنْ أَمِيرِ الْمُؤْمِنِينَ أَبِي حَفْصٍ عُمَرَ بْنِ الْخَطَّابِ رَضِيَ اللهُ عَنْهُ قَالَ: سَمِعْتُ رَسُولَ اللَّهِ ﷺ يَقُولُ: «إِنَّمَا الْأَعْمَالُ بِالنِّيَّاتِ، وَإِنَّمَا لِكُلِّ امْرِئٍ مَا نَوَى».", "هذا الحديث قاعدة عظيمة من قواعد الإسلام وعليه مدار قبول الأعمال.", "• وجوب إخلاص النية لله في كل قول وعمل."),
                   HadithItem("2. فضل قراءة القرآن وتعلمه", "عثمان بن عفان رضي الله عنه", "صحيح البخاري (5027)", "قَالَ رَسُولُ اللَّهِ ﷺ: «خَيْرُكُمْ مَنْ تَعَلَّمَ الْقُرْآنَ وَعَلَّمَهُ».", "يبين النبي ﷺ أن أفضل الناس منزلة هم أهل القرآن.", "• الحرص على ورد يومي لتعلم القرآن وتدبره."),
                   HadithItem("3. أحب الأعمال إلى الله", "عبد الله بن مسعود رضي الله عنه", "متفق عليه", "سَأَلْتُ النَّبِيَّ ﷺ: أَيُّ الْعَمَلِ أَحَبُّ إِلَى اللَّهِ؟ قَالَ: «الصَّلَاةُ عَلَى وَقْتِهَا»، قَالَ: ثُمَّ أَيٌّ؟ قَالَ: «ثُمَّ بِرُّ الْوَالِدَيْنِ».", "رتّب النبي ﷺ أحب الأعمال إلى الله تعالى فبدأ بالصلاة.", "• المبادرة للصلاة فور سماع الأذان."),
                   HadithItem("4. فضل الصلاة على النبي ﷺ", "أبو هريرة رضي الله عنه", "صحيح مسلم (408)", "قَالَ رَسُولُ اللَّهِ ﷺ: «مَنْ صَلَّى عَلَيَّ وَاحِدَةً صَلَّى اللَّهُ عَلَيْهِ عَشْرًا».", "صلاة الله على عبده هي ثناؤه عليه في الملأ الأعلى.", "• الإكثار من الصلاة على النبي ﷺ طوال اليوم."),
@@ -454,28 +514,6 @@ jobs:
                   IslamicArticle("4. أحكام المدود", "الطبيعي والفرعي", "المد الطبيعي حركتان، والفرعي يتراوح بين 4 إلى 6 حركات.")
               )
           }
-          EOF
-
-          # 11. حساب المواقيت (PrayerCalculator.kt)
-          cat << 'EOF' > app/src/main/java/com/hona/alquran/PrayerCalculator.kt
-          package com.hona.alquran
-
-          import android.content.Context
-          import android.icu.util.IslamicCalendar
-          import android.icu.util.ULocale
-          import com.batoulapps.adhan.CalculationMethod
-          import com.batoulapps.adhan.Coordinates
-          import com.batoulapps.adhan.Madhab
-          import com.batoulapps.adhan.PrayerTimes
-          import com.batoulapps.adhan.Qibla
-          import com.batoulapps.adhan.data.DateComponents
-          import java.text.SimpleDateFormat
-          import java.util.Calendar
-          import java.util.Date
-          import java.util.Locale
-          import java.util.TimeZone
-
-          data class PrayerItem(val key: String, val name: String, val timeInMillis: Long, val formattedTime: String)
 
           object PrayerCalculator {
               fun saveLocation(context: Context, lat: Double, lng: Double, cityName: String = "موقعك الحالي (GPS)") {
@@ -541,32 +579,6 @@ jobs:
                   } catch (_: Exception) { "" }
               }
           }
-          EOF
-
-          # 12. محرك الصوت والراديو (service/AudioEngine.kt)
-          cat << 'EOF' > app/src/main/java/com/hona/alquran/service/AudioEngine.kt
-          package com.hona.alquran.service
-
-          import android.app.NotificationChannel
-          import android.app.NotificationManager
-          import android.app.PendingIntent
-          import android.content.BroadcastReceiver
-          import android.content.Context
-          import android.content.Intent
-          import android.media.AudioAttributes
-          import android.media.MediaPlayer
-          import android.os.Build
-          import android.os.Handler
-          import android.os.Looper
-          import android.os.PowerManager
-          import android.widget.Toast
-          import androidx.compose.runtime.MutableState
-          import androidx.compose.runtime.mutableStateOf
-          import androidx.core.app.NotificationCompat
-          import com.hona.alquran.MainActivity
-          import java.io.File
-          import java.net.HttpURLConnection
-          import java.net.URL
 
           object MediaPlaybackState {
               val currentTitle: MutableState<String?> = mutableStateOf(null)
@@ -816,19 +828,6 @@ jobs:
                   }
               }
           }
-          EOF
-
-          # 13. جدول الأذان (service/AdhanScheduler.kt)
-          cat << 'EOF' > app/src/main/java/com/hona/alquran/service/AdhanScheduler.kt
-          package com.hona.alquran.service
-
-          import android.app.AlarmManager
-          import android.app.PendingIntent
-          import android.content.Context
-          import android.content.Intent
-          import com.hona.alquran.MainActivity
-          import com.hona.alquran.PrayerCalculator
-          import java.util.Calendar
 
           object AdhanScheduler {
               fun scheduleAllPrayers(context: Context) {
@@ -900,20 +899,6 @@ jobs:
                   SalawatKeepAliveService.syncState(context)
               }
           }
-          EOF
-
-          # 14. مستقبل الأذان
-          cat << 'EOF' > app/src/main/java/com/hona/alquran/service/AdhanReceiver.kt
-          package com.hona.alquran.service
-
-          import android.app.NotificationChannel
-          import android.app.NotificationManager
-          import android.content.BroadcastReceiver
-          import android.content.Context
-          import android.content.Intent
-          import android.media.RingtoneManager
-          import android.os.Build
-          import androidx.core.app.NotificationCompat
 
           class AdhanReceiver : BroadcastReceiver() {
               override fun onReceive(context: Context, intent: Intent) {
@@ -960,49 +945,10 @@ jobs:
                   nm.notify(4004, notif)
               }
           }
-          EOF
-
-          # 15. مستقبل تذكير صل على محمد الصامت والصحيح
-          cat << 'EOF' > app/src/main/java/com/hona/alquran/service/SalawatReceiver.kt
-          package com.hona.alquran.service
-
-          import android.content.BroadcastReceiver
-          import android.content.Context
-          import android.content.Intent
 
           class SalawatReceiver : BroadcastReceiver() {
-              override fun onReceive(context: Context, intent: Intent) {
-                  // يتم استقبال التنبيه ولا داعي لأي إجراء هنا لأن SalawatKeepAliveService يديره بدقة
-              }
+              override fun onReceive(context: Context, intent: Intent) {}
           }
-          EOF
-
-          # 16. خدمة الأذان
-          cat << 'EOF' > app/src/main/java/com/hona/alquran/service/AdhanService.kt
-          package com.hona.alquran.service
-
-          import android.app.*
-          import android.content.BroadcastReceiver
-          import android.content.Context
-          import android.content.Intent
-          import android.content.IntentFilter
-          import android.media.AudioAttributes
-          import android.media.AudioManager
-          import android.media.MediaPlayer
-          import android.media.RingtoneManager
-          import android.os.Build
-          import android.os.Handler
-          import android.os.IBinder
-          import android.os.Looper
-          import android.os.PowerManager
-          import android.speech.tts.TextToSpeech
-          import androidx.core.app.NotificationCompat
-          import com.hona.alquran.MainActivity
-          import java.io.File
-          import java.net.HttpURLConnection
-          import java.net.URL
-          import java.net.URLEncoder
-          import java.util.Locale
 
           class AdhanService : Service() {
               private var mp: MediaPlayer? = null
@@ -1246,20 +1192,6 @@ jobs:
 
               override fun onBind(intent: Intent?): IBinder? = null
           }
-          EOF
-
-          # 16-ب. خدمة الخلفية الصامتة والدقيقة تماماً (SalawatKeepAliveService.kt) بدون أي إشعار مزعج
-          cat << 'EOF' > app/src/main/java/com/hona/alquran/service/SalawatKeepAliveService.kt
-          package com.hona.alquran.service
-
-          import android.app.AlarmManager
-          import android.app.PendingIntent
-          import android.content.BroadcastReceiver
-          import android.content.Context
-          import android.content.Intent
-          import android.os.Build
-          import android.os.PowerManager
-          import com.hona.alquran.MainActivity
 
           class SalawatKeepAliveService : BroadcastReceiver() {
               companion object {
@@ -1312,14 +1244,6 @@ jobs:
                   }
               }
           }
-          EOF
-
-          cat << 'EOF' > app/src/main/java/com/hona/alquran/service/BootReceiver.kt
-          package com.hona.alquran.service
-
-          import android.content.BroadcastReceiver
-          import android.content.Context
-          import android.content.Intent
 
           class BootReceiver : BroadcastReceiver() {
               override fun onReceive(context: Context, intent: Intent) {
@@ -1329,192 +1253,1200 @@ jobs:
                   }
               }
           }
-          EOF
 
-          # 17. نقطة الدخول الرئيسية MainActivity.kt
-          cat << 'EOF' > app/src/main/java/com/hona/alquran/MainActivity.kt
-          package com.hona.alquran
-
-          import android.Manifest
-          import android.annotation.SuppressLint
-          import android.app.DownloadManager
-          import android.app.NotificationChannel
-          import android.app.NotificationManager
-          import android.content.Context
-          import android.content.Intent
-          import android.media.AudioManager
-          import android.net.Uri
-          import android.os.*
-          import android.widget.Toast
-          import androidx.activity.ComponentActivity
-          import androidx.activity.compose.rememberLauncherForActivityResult
-          import androidx.activity.compose.setContent
-          import androidx.activity.result.contract.ActivityResultContracts
-          import androidx.compose.animation.*
-          import androidx.compose.animation.core.*
-          import androidx.compose.foundation.*
-          import androidx.compose.foundation.layout.*
-          import androidx.compose.foundation.shape.*
-          import androidx.compose.material.icons.Icons
-          import androidx.compose.material.icons.filled.*
-          import androidx.compose.material3.*
-          import androidx.compose.runtime.*
-          import androidx.compose.ui.Alignment
-          import androidx.compose.ui.Modifier
-          import androidx.compose.ui.draw.scale
-          import androidx.compose.ui.geometry.Offset
-          import androidx.compose.ui.graphics.*
-          import androidx.compose.ui.graphics.drawscope.Stroke
-          import androidx.compose.ui.platform.*
-          import androidx.compose.ui.text.font.FontWeight
-          import androidx.compose.ui.unit.*
-          import androidx.core.app.NotificationCompat
-          import com.google.android.gms.location.LocationServices
-          import com.hona.alquran.service.*
-          import com.hona.alquran.ui.*
-          import kotlinx.coroutines.*
-          import org.json.JSONObject
-          import java.net.HttpURLConnection
-          import java.net.URL
-          import java.util.*
-
-          const val CURRENT_APP_VERSION = "7.8"
-          const val CURRENT_VERSION_CODE = 28
-
-          data class SurahInfo(val number: Int, val name: String, val ayahsCount: Int)
-          data class AyahWithTafsir(val numberInSurah: Int, val text: String, val tafsir: String)
-          data class ZikrItem(val category: String, val text: String, val benefit: String, val targetCount: Int)
-          data class Reciter(val name: String, val serverUrl: String)
-          data class RadioStation(val name: String, val subtitle: String, val streamUrl: String)
-
-          val RECITERS = listOf(
-              Reciter("مشاري راشد العفاسي", "https://server8.mp3quran.net/afs"),
-              Reciter("محمود خليل الحصري (المرتل)", "https://server13.mp3quran.net/husr"),
-              Reciter("المصحف المعلم للأطفال - الشيخ الحصري", "https://server13.mp3quran.net/husr/Muallim"),
-              Reciter("عبد الباسط عبد الصمد", "https://server7.mp3quran.net/basit"),
-              Reciter("محمد صديق المنشاوي", "https://server10.mp3quran.net/minsh")
-          )
-
-          val STATIONS = listOf(
-              RadioStation("إذاعة القرآن الكريم من القاهرة", "البث المباشر الرسمي 24 ساعة", "https://stream.radiojar.com/8s5u5tpdtwzuv"),
-              RadioStation("إذاعة القرآن الكريم - مكة المكرمة", "بث مباشر من الحرم المكي", "https://n02.radiojar.com/4wqre23fytzuv"),
-              RadioStation("إذاعة تلاوات الشيخ عبد الباسط", "تلاوات مجودة خاشعة", "https://qurango.net/radio/abdulbasit_abdulsamad_mojawwad"),
-              RadioStation("إذاعة الشيخ محمد صديق المنشاوي", "تلاوات مرتلة ومجودة", "https://qurango.net/radio/mohammed_siddiq_alminshawi_mojawwad"),
-              RadioStation("إذاعة الشيخ محمود خليل الحصري", "المصحف المرتل الكامل", "https://qurango.net/radio/mahmoud_khalil_alhussary"),
-              RadioStation("إذاعة الشيخ مشاري العفاسي", "بث مباشر 24 ساعة", "https://qurango.net/radio/mishary_alafasi"),
-              RadioStation("إذاعة الفتاوى والرقية الشرعية", "آيات السكينة والرقية الشرعية", "https://qurango.net/radio/roqiah")
-          )
-
-          val ADHANS = listOf(
-              "أذان قناة المحور - الشيخ نصر الدين طوبار (مدمج)" to "RAW_BUILTIN",
-              "أذان الحرم المكي الشريف" to "https://www.islamcan.com/audio/adhan/azan1.mp3",
-              "أذان المسجد النبوي الشريف" to "https://www.islamcan.com/audio/adhan/azan2.mp3",
-              "أذان الشيخ عبد الباسط عبد الصمد" to "https://www.islamcan.com/audio/adhan/azan3.mp3"
-          )
-
-          val AZKAR = listOf(
-              ZikrItem("أذكار الصباح", "أَصْبَحْنَا وَأَصْبَحَ الْمُلْكُ لِلَّهِ، وَالْحَمْدُ لِلَّهِ لاَ إِلَـهَ إِلاَّ اللهُ وَحْدَهُ لاَ شَرِيكَ لَهُ، لَهُ الْمُلْكُ وَلَهُ الْحَمْدُ وَهُوَ عَلَى كُلِّ شَيْءٍ قَدِيرٌ.", "حفظ وبركة في بداية اليوم", 1),
-              ZikrItem("أذكار الصباح", "بِسْمِ اللهِ الَّذِي لاَ يَضُرُّ مَعَ اسْمِهِ شَيْءٌ فِي الأَرْضِ وَلاَ فِي السَّمَاءِ وَهُوَ السَّمِيعُ الْعَلِيمُ.", "من قالها ثلاثاً لم يضره شيء", 3),
-              ZikrItem("أذكار الصباح", "رَضِيتُ بِاللَّهِ رَبَّاً، وَبِالإِسْلاَمِ دِيناً، وَبِمُحَمَّدٍ ﷺ نَبِيّاً.", "كان حقاً على الله أن يرضيه", 3),
-              ZikrItem("أذكار المساء", "أَمْسَيْنَا وَأَمْسَى الْمُلْكُ لِلَّهِ، وَالْحَمْدُ لِلَّهِ لاَ إِلَـهَ إِلاَّ اللهُ وَحْدَهُ لاَ شَرِيكَ لَهُ.", "حفظ طوال الليل", 1),
-              ZikrItem("أذكار المساء", "أَعُوذُ بِكَلِمَاتِ اللهِ التَّامَّاتِ مِنْ شَرِّ مَا خَلَقَ.", "تحصين تام من كل سوء", 3),
-              ZikrItem("بعد الصلاة", "أَسْتَغْفِرُ اللهَ (ثَلاَثاً) اللَّهُمَّ أَنْتَ السَّلاَمُ، وَمِنْكَ السَّلاَمُ، تَبَارَكْتَ يَا ذَا الْجَلاَلِ وَالإِكْرَامِ.", "سنة عقب كل صلاة", 1),
-              ZikrItem("بعد الصلاة", "سُبْحَانَ اللهِ (33) • الْحَمْدُ لِلَّهِ (33) • اللهُ أَكْبَرُ (33)", "غُفرت خطاياه وإن كانت مثل زبد البحر", 33)
-          )
-
-          fun startMediaService(context: Context, url: String, title: String, subtitle: String) {
-              AudioEngine.play(context, url, title, subtitle)
-          }
-
-          fun toggleMediaService(context: Context) {
-              AudioEngine.toggle(context)
-          }
-
-          fun stopMediaService(context: Context) {
-              AudioEngine.stop(context)
-          }
-
-          fun triggerSalawatNow(context: Context) {
-              val si = Intent(context, AdhanService::class.java).apply { action = "PLAY_SALAWAT" }
-              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(si) else context.startService(si)
-          }
-
-          fun installApkFile(context: Context, file: java.io.File) {
-              try {
-                  val uri = androidx.core.content.FileProvider.getUriForFile(
-                      context,
-                      "${context.packageName}.provider",
-                      file
+          @Composable
+          fun UniformButton(text: String, modifier: Modifier = Modifier, isSelected: Boolean = false, onClick: () -> Unit) {
+              var focused by remember { mutableStateOf(false) }
+              Button(
+                  onClick = onClick,
+                  modifier = modifier
+                      .onFocusChanged { focused = it.isFocused }
+                      .focusable()
+                      .border(
+                          width = if (focused || isSelected) 2.dp else 1.dp,
+                          color = if (focused || isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                          shape = RoundedCornerShape(12.dp)
+                      ),
+                  colors = ButtonDefaults.buttonColors(
+                      containerColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                      contentColor = if (isSelected) Color(0xFF06281E) else Color.White
+                  ),
+                  contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
+                  shape = RoundedCornerShape(12.dp)
+              ) {
+                  Text(
+                      text = text,
+                      fontSize = 13.sp,
+                      fontWeight = FontWeight.Bold,
+                      maxLines = 1,
+                      softWrap = false,
+                      overflow = TextOverflow.Visible,
+                      textAlign = TextAlign.Center
                   )
-                  val installIntent = Intent(Intent.ACTION_VIEW).apply {
-                      setDataAndType(uri, "application/vnd.android.package-archive")
-                      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                  }
-                  context.startActivity(installIntent)
-              } catch (_: Exception) {
-                  Toast.makeText(context, "افتح مجلد التنزيلات (Downloads) واضغط على ${file.name}", Toast.LENGTH_LONG).show()
               }
           }
 
-          fun triggerDirectDownloadUpdate(context: Context, targetVersion: String = "latest") {
-              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !context.packageManager.canRequestPackageInstalls()) {
-                  Toast.makeText(context, "فعّل إذن (تثبيت التطبيقات غير المعروفة) ثم ارجع واضغط تحديث", Toast.LENGTH_LONG).show()
-                  val intent = Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
-                  context.startActivity(intent)
-                  return
-              }
+          @Composable
+          fun PrayerDashboard(prayers: List<PrayerItem>, next: PrayerItem?, cd: String, stat: String) {
+              val context = LocalContext.current
+              val prefs = remember { context.getSharedPreferences("hona_prefs", Context.MODE_PRIVATE) }
+              val todayGregorian = remember { SimpleDateFormat("EEEE، d MMMM yyyy", Locale("ar")).format(Date()) }
+              val todayKey = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) }
 
-              val cleanVer = targetVersion.replace(Regex("[^a-zA-Z0-9._-]"), "").ifEmpty { "latest" }
-              val fileName = "alhana-quran-$cleanVer.apk"
-              val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-              val existingFile = java.io.File(downloadsDir, fileName)
+              var fajrDone by remember { mutableStateOf(prefs.getBoolean("track_${todayKey}_fajr", false)) }
+              var dhuhrDone by remember { mutableStateOf(prefs.getBoolean("track_${todayKey}_dhuhr", false)) }
+              var asrDone by remember { mutableStateOf(prefs.getBoolean("track_${todayKey}_asr", false)) }
+              var maghribDone by remember { mutableStateOf(prefs.getBoolean("track_${todayKey}_maghrib", false)) }
+              var ishaDone by remember { mutableStateOf(prefs.getBoolean("track_${todayKey}_isha", false)) }
 
-              if (existingFile.exists() && existingFile.length() > 1_000_000L) {
-                  Toast.makeText(context, "التحديث محمّل بالفعل! جاري فتح شاشة التثبيت مباشرة...", Toast.LENGTH_SHORT).show()
-                  installApkFile(context, existingFile)
-                  return
-              }
-
-              val ts = System.currentTimeMillis()
-              val apkUrl = "https://github.com/Alifathy2/HANA-Quran-Prayer/releases/latest/download/alhana.quran.apk?t=$ts"
-
-              try {
-                  val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-                  val req = DownloadManager.Request(Uri.parse(apkUrl))
-                      .setTitle("تحديث هَنَا القُرآن ($cleanVer)")
-                      .setDescription("جاري تنزيل التحديث...")
-                      .setMimeType("application/vnd.android.package-archive")
-                      .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                      .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
-                      .setAllowedOverMetered(true)
-
-                  val downloadId = dm.enqueue(req)
-                  Toast.makeText(context, "بدأ تحميل التحديث لأول مرة... سيفتح التثبيت تلقائياً فور الانتهاء", Toast.LENGTH_LONG).show()
-
-                  CoroutineScope(Dispatchers.IO).launch {
-                      var downloading = true
-                      while (downloading) {
-                          val q = DownloadManager.Query().setFilterById(downloadId)
-                          val cursor = dm.query(q)
-                          if (cursor != null && cursor.moveToFirst()) {
-                              val statusIdx = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
-                              val status = if (statusIdx >= 0) cursor.getInt(statusIdx) else -1
-                              if (status == DownloadManager.STATUS_SUCCESSFUL) {
-                                  downloading = false
-                                  withContext(Dispatchers.Main) {
-                                      installApkFile(context, existingFile)
-                                  }
-                              } else if (status == DownloadManager.STATUS_FAILED) {
-                                  downloading = false
+              LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
+                  item {
+                      Card(
+                          modifier = Modifier
+                              .fillMaxWidth()
+                              .border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(22.dp)),
+                          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)),
+                          shape = RoundedCornerShape(22.dp)
+                      ) {
+                          Column(modifier = Modifier.fillMaxWidth().padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                              Text("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                              Spacer(Modifier.height(8.dp))
+                              Box(
+                                  modifier = Modifier
+                                      .background(Color(0xFF06281E), RoundedCornerShape(50))
+                                      .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), RoundedCornerShape(50))
+                                      .padding(horizontal = 20.dp, vertical = 6.dp)
+                              ) {
+                                  Text("🕌 مواقيت الصلاة • $stat", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                               }
+                              Spacer(Modifier.height(10.dp))
+                              Text("الصلاة القادمة: ${next?.name ?: ""} بعد", fontSize = 15.sp, color = Color(0xFFE0E0E0))
+                              Text(cd, fontSize = 38.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                              Text("$todayGregorian  •  ${PrayerCalculator.getHijriDateString()}", fontSize = 12.sp, color = Color.LightGray)
                           }
-                          cursor?.close()
-                          delay(1000L)
                       }
                   }
-              } catch (_: Exception) {
-                  context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl)))
+
+                  item {
+                      Card(
+                          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)),
+                          shape = RoundedCornerShape(16.dp),
+                          modifier = Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+                      ) {
+                          Column(modifier = Modifier.padding(12.dp)) {
+                              Text("✓ متابعة صلواتك اليوم (اضغط لتسجيل صلاتك)", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                              Spacer(Modifier.height(8.dp))
+                              Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                                  listOf(
+                                      Triple("الفجر", fajrDone) { v: Boolean -> fajrDone = v; prefs.edit().putBoolean("track_${todayKey}_fajr", v).apply() },
+                                      Triple("الظهر", dhuhrDone) { v: Boolean -> dhuhrDone = v; prefs.edit().putBoolean("track_${todayKey}_dhuhr", v).apply() },
+                                      Triple("العصر", asrDone) { v: Boolean -> asrDone = v; prefs.edit().putBoolean("track_${todayKey}_asr", v).apply() },
+                                      Triple("المغرب", maghribDone) { v: Boolean -> maghribDone = v; prefs.edit().putBoolean("track_${todayKey}_maghrib", v).apply() },
+                                      Triple("العشاء", ishaDone) { v: Boolean -> ishaDone = v; prefs.edit().putBoolean("track_${todayKey}_isha", v).apply() }
+                                  ).forEach { (pName, done, toggleFn) ->
+                                      UniformButton(
+                                          text = if (done) "$pName ✓" else pName,
+                                          modifier = Modifier.weight(1f),
+                                          isSelected = done
+                                      ) { toggleFn(!done) }
+                                  }
+                              }
+                          }
+                      }
+                  }
+
+                  items(prayers) { p ->
+                      val isN = p.key == next?.key
+                      Row(
+                          modifier = Modifier
+                              .fillMaxWidth()
+                              .background(
+                                  if (isN) Color(0xFFFDF0D5) else MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                                  RoundedCornerShape(14.dp)
+                              )
+                              .border(
+                                  width = if (isN) 2.dp else 1.dp,
+                                  color = if (isN) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
+                                  shape = RoundedCornerShape(14.dp)
+                              )
+                              .padding(horizontal = 20.dp, vertical = 15.dp),
+                          horizontalArrangement = Arrangement.SpaceBetween,
+                          verticalAlignment = Alignment.CenterVertically
+                      ) {
+                          Row(verticalAlignment = Alignment.CenterVertically) {
+                              Icon(
+                                  if (p.key == "sunrise") Icons.Default.WbSunny else Icons.Default.AccessTime,
+                                  contentDescription = null,
+                                  tint = if (isN) Color(0xFFB07219) else MaterialTheme.colorScheme.primary
+                              )
+                              Spacer(Modifier.width(10.dp))
+                              Text(
+                                  text = p.name,
+                                  fontSize = 19.sp,
+                                  fontWeight = FontWeight.Bold,
+                                  color = if (isN) Color(0xFF7A4900) else Color.White
+                              )
+                          }
+                          Text(
+                              text = p.formattedTime,
+                              fontSize = 19.sp,
+                              fontWeight = FontWeight.Bold,
+                              color = if (isN) Color(0xFF7A4900) else MaterialTheme.colorScheme.primary
+                          )
+                      }
+                  }
+              }
+          }
+
+          @Composable
+          fun QuranScreen(scale: Float) {
+              val context = LocalContext.current
+              val prefs = remember { context.getSharedPreferences("hona_prefs", Context.MODE_PRIVATE) }
+              val scope = rememberCoroutineScope()
+
+              var surahs by remember { mutableStateOf(emptyList<SurahInfo>()) }
+              var query by remember { mutableStateOf("") }
+              var selSurah by remember { mutableStateOf<SurahInfo?>(null) }
+              var infoDialogSurah by remember { mutableStateOf<SurahInfo?>(null) }
+              var ayahs by remember { mutableStateOf(emptyList<AyahWithTafsir>()) }
+              var loading by remember { mutableStateOf(true) }
+              var tafsir by remember { mutableStateOf(true) }
+              var bookmark by remember { mutableIntStateOf(prefs.getInt("bookmark", 1)) }
+              var selectedReciterIndex by remember { mutableIntStateOf(prefs.getInt("reciter_idx", 0)) }
+
+              var offlineDownloadProgress by remember { mutableIntStateOf(-1) }
+              var audioDownloadStatus by remember { mutableStateOf<String?>(null) }
+
+              val currentUrl by MediaPlaybackState.currentUrl
+              val isPlaying by MediaPlaybackState.isPlaying
+
+              LaunchedEffect(Unit) {
+                  withContext(Dispatchers.IO) {
+                      try {
+                          val cache = File(context.filesDir, "surahs.json")
+                          val json = if (cache.exists()) cache.readText() else URL("https://api.alquran.cloud/v1/surah").readText().also { cache.writeText(it) }
+                          val data = JSONObject(json).getJSONArray("data")
+                          val list = mutableListOf<SurahInfo>()
+                          for (i in 0 until data.length()) {
+                              val it = data.getJSONObject(i)
+                              list.add(SurahInfo(it.getInt("number"), it.getString("name"), it.getInt("numberOfAyahs")))
+                          }
+                          surahs = list
+                      } catch (_: Exception) {} finally { loading = false }
+                  }
+              }
+
+              if (infoDialogSurah != null) {
+                  val s = infoDialogSurah!!
+                  val meta = IslamicRepository.getSurahDetails(s.number, s.name, s.ayahsCount)
+                  AlertDialog(
+                      onDismissRequest = { infoDialogSurah = null },
+                      title = {
+                          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                              Text("معلومات ${s.name}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                              IconButton(onClick = { infoDialogSurah = null }) { Icon(Icons.Default.Close, null, tint = Color.White) }
+                          }
+                      },
+                      text = {
+                          Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                              Text("• التصنيف وعدد الآيات: ${meta.revelationTypeAr}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                              Text("• سبب النزول وتاريخها:\n${meta.reasonOfRevelation}", fontSize = 14.sp, lineHeight = 22.sp)
+                              Text("• فضل السورة ومحورها:\n${meta.virtuesAndTheme}", fontSize = 14.sp, lineHeight = 22.sp)
+                          }
+                      },
+                      confirmButton = { UniformButton("حسناً") { infoDialogSurah = null } },
+                      containerColor = MaterialTheme.colorScheme.surface,
+                      titleContentColor = Color.White,
+                      textContentColor = Color.White
+                  )
+              }
+
+              fun openSurah(s: SurahInfo) {
+                  selSurah = s; loading = true
+                  prefs.edit().putInt("bookmark", s.number).apply()
+                  bookmark = s.number
+                  scope.launch(Dispatchers.IO) {
+                      try {
+                          val cache = File(context.filesDir, "surah_${s.number}.json")
+                          val res = if (cache.exists()) cache.readText() else URL("https://api.alquran.cloud/v1/surah/${s.number}/editions/quran-uthmani,ar.muyassar").readText().also { cache.writeText(it) }
+                          val ed = JSONObject(res).getJSONArray("data")
+                          val qa = ed.getJSONObject(0).getJSONArray("ayahs")
+                          val ta = ed.getJSONObject(1).getJSONArray("ayahs")
+                          val list = mutableListOf<AyahWithTafsir>()
+                          for (i in 0 until qa.length()) list.add(AyahWithTafsir(qa.getJSONObject(i).getInt("numberInSurah"), qa.getJSONObject(i).getString("text"), ta.getJSONObject(i).getString("text")))
+                          ayahs = list
+                      } catch (_: Exception) {} finally { loading = false }
+                  }
+              }
+
+              if (selSurah == null) {
+                  Column(modifier = Modifier.fillMaxSize()) {
+                      OutlinedTextField(
+                          value = query,
+                          onValueChange = { query = it },
+                          placeholder = { Text("ابحث عن اسم السورة...") },
+                          leadingIcon = { Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.primary) },
+                          modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                          singleLine = true
+                      )
+
+                      Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                          surahs.firstOrNull { it.number == bookmark }?.let { bm ->
+                              UniformButton("علامة القراءة: ${bm.name}", Modifier.weight(1f)) { openSurah(bm) }
+                          }
+                          UniformButton(
+                              text = if (offlineDownloadProgress in 1..114) "جاري التحميل ($offlineDownloadProgress/114)" else "تحميل المصحف أوفلاين",
+                              modifier = Modifier.weight(1f)
+                          ) {
+                              if (offlineDownloadProgress in 1..114) return@UniformButton
+                              offlineDownloadProgress = 1
+                              scope.launch(Dispatchers.IO) {
+                                  for (num in 1..114) {
+                                      offlineDownloadProgress = num
+                                      val f = File(context.filesDir, "surah_$num.json")
+                                      if (!f.exists() || f.length() < 100) {
+                                          try {
+                                              val txt = URL("https://api.alquran.cloud/v1/surah/$num/editions/quran-uthmani,ar.muyassar").readText()
+                                              f.writeText(txt)
+                                          } catch (_: Exception) {}
+                                      }
+                                  }
+                                  withContext(Dispatchers.Main) {
+                                      offlineDownloadProgress = -1
+                                      Toast.makeText(context, "تم حفظ القرآن الكريم والتفسير كاملاً للعمل بدون إنترنت ✓", Toast.LENGTH_LONG).show()
+                                  }
+                              }
+                          }
+                      }
+
+                      if (loading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = MaterialTheme.colorScheme.primary) }
+                      else LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                          items(surahs.filter { it.name.contains(query) || it.number.toString() == query }) { s ->
+                              val isOfflineSaved = File(context.filesDir, "surah_${s.number}.json").exists()
+                              Card(
+                                  modifier = Modifier
+                                      .fillMaxWidth()
+                                      .border(0.8.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f), RoundedCornerShape(14.dp))
+                                      .clickable { openSurah(s) },
+                                  colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)),
+                                  shape = RoundedCornerShape(14.dp)
+                              ) {
+                                  Row(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                      Row(verticalAlignment = Alignment.CenterVertically) {
+                                          Text("${s.number}. ${s.name}", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                                          if (isOfflineSaved) {
+                                              Spacer(Modifier.width(6.dp))
+                                              Icon(Icons.Default.OfflinePin, contentDescription = "محفوظة", tint = Color(0xFF4CAF50), modifier = Modifier.size(16.dp))
+                                          }
+                                      }
+                                      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                          Text("${s.ayahsCount} آية", color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+                                          IconButton(
+                                              onClick = { infoDialogSurah = s },
+                                              modifier = Modifier.size(34.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f), CircleShape)
+                                          ) {
+                                              Icon(Icons.Default.Info, contentDescription = "معلومات السورة", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                                          }
+                                      }
+                                  }
+                              }
+                          }
+                      }
+                  }
+              } else {
+                  val currentReciter = RECITERS.getOrElse(selectedReciterIndex) { RECITERS.first() }
+                  val num = String.format(Locale.US, "%03d", selSurah!!.number)
+                  val remoteUrl = "${currentReciter.serverUrl}/$num.mp3"
+                  val localAudioFile = File(context.filesDir, "audio_${selectedReciterIndex}_$num.mp3")
+                  val effectiveAudioSource = if (localAudioFile.exists() && localAudioFile.length() > 15000) localAudioFile.absolutePath else remoteUrl
+                  val isThisSurahPlaying = (currentUrl == remoteUrl || currentUrl == localAudioFile.absolutePath) && isPlaying
+
+                  Column(modifier = Modifier.fillMaxSize()) {
+                      Row(modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                          UniformButton("الفهرس") { selSurah = null }
+                          Row(verticalAlignment = Alignment.CenterVertically) {
+                              Text(selSurah!!.name, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                              IconButton(onClick = { infoDialogSurah = selSurah }) {
+                                  Icon(Icons.Default.Info, contentDescription = "سبب النزول", tint = MaterialTheme.colorScheme.primary)
+                              }
+                          }
+                          UniformButton(if (tafsir) "إخفاء التفسير" else "التفسير") { tafsir = !tafsir }
+                      }
+
+                      ScrollableTabRow(
+                          selectedTabIndex = selectedReciterIndex,
+                          containerColor = MaterialTheme.colorScheme.surface,
+                          contentColor = MaterialTheme.colorScheme.primary,
+                          edgePadding = 4.dp,
+                          modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                      ) {
+                          RECITERS.forEachIndexed { idx, rec ->
+                              Tab(
+                                  selected = selectedReciterIndex == idx,
+                                  onClick = {
+                                      selectedReciterIndex = idx
+                                      prefs.edit().putInt("reciter_idx", idx).apply()
+                                  },
+                                  text = { Text(rec.name, fontSize = 12.sp, maxLines = 1, softWrap = false) }
+                              )
+                          }
+                      }
+
+                      Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                          UniformButton(if (isThisSurahPlaying) "إيقاف مؤقت" else "تشغيل التلاوة الآن", Modifier.weight(1f)) {
+                              if (currentUrl == effectiveAudioSource) {
+                                  toggleMediaService(context)
+                              } else {
+                                  startMediaService(
+                                      context = context,
+                                      url = effectiveAudioSource,
+                                      title = "تلاوة ${selSurah!!.name}",
+                                      subtitle = currentReciter.name
+                                  )
+                              }
+                          }
+                          UniformButton(
+                              text = if (localAudioFile.exists() && localAudioFile.length() > 15000) "محفوظة صوتياً ✓" else (audioDownloadStatus ?: "تحميل الصوت أوفلاين"),
+                              modifier = Modifier.weight(1f)
+                          ) {
+                              if (localAudioFile.exists() && localAudioFile.length() > 15000) {
+                                  Toast.makeText(context, "تلاوة السورة محفوظة بالفعل وتعمل بدون إنترنت", Toast.LENGTH_SHORT).show()
+                                  return@UniformButton
+                              }
+                              audioDownloadStatus = "جاري التحميل..."
+                              scope.launch(Dispatchers.IO) {
+                                  try {
+                                      val conn = (URL(remoteUrl).openConnection() as HttpURLConnection).apply {
+                                          instanceFollowRedirects = true
+                                          setRequestProperty("User-Agent", "Mozilla/5.0")
+                                      }
+                                      conn.inputStream.use { i -> localAudioFile.outputStream().use { o -> i.copyTo(o) } }
+                                      withContext(Dispatchers.Main) {
+                                          audioDownloadStatus = null
+                                          Toast.makeText(context, "تم حفظ تلاوة ${selSurah!!.name} للعمل بدون إنترنت ✓", Toast.LENGTH_LONG).show()
+                                      }
+                                  } catch (_: Exception) {
+                                      withContext(Dispatchers.Main) {
+                                          audioDownloadStatus = null
+                                          Toast.makeText(context, "تعذر التحميل، تأكد من الاتصال بالإنترنت", Toast.LENGTH_SHORT).show()
+                                      }
+                                  }
+                              }
+                          }
+                      }
+
+                      if (loading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = MaterialTheme.colorScheme.primary) }
+                      else LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                          items(ayahs) { a ->
+                              Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)), shape = RoundedCornerShape(14.dp)) {
+                                  Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
+                                      Text("${a.text} ﴿${a.numberInSurah}﴾", fontSize = (22 * scale).sp, lineHeight = (38 * scale).sp, textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth())
+                                      if (tafsir) {
+                                          HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.3f))
+                                          Text("التفسير الميسر: ${a.tafsir}", fontSize = (15 * scale).sp, lineHeight = (25 * scale).sp, color = Color(0xFFE0E0E0), textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth())
+                                      }
+                                  }
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+
+          @Composable
+          fun AzkarOnlyScreen(scale: Float) {
+              val tabs = listOf("أذكار الصباح", "أذكار المساء", "بعد الصلاة")
+              var tabIdx by remember { mutableIntStateOf(0) }
+
+              Column(modifier = Modifier.fillMaxSize()) {
+                  ScrollableTabRow(selectedTabIndex = tabIdx, containerColor = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.primary, edgePadding = 8.dp) {
+                      tabs.forEachIndexed { i, t ->
+                          Tab(selected = tabIdx == i, onClick = { tabIdx = i }, text = { Text(t, fontSize = 14.sp, fontWeight = if (tabIdx == i) FontWeight.Bold else FontWeight.Normal, maxLines = 1, softWrap = false) })
+                      }
+                  }
+                  Spacer(Modifier.height(10.dp))
+                  val list = AZKAR.filter { it.category == tabs[tabIdx] }
+                  LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                      items(list) { z ->
+                          var c by remember(z) { mutableIntStateOf(z.targetCount) }
+                          Card(
+                              modifier = Modifier
+                                  .fillMaxWidth()
+                                  .border(1.dp, if (c == 0) Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+                                  .clickable { if (c > 0) c-- },
+                              colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)),
+                              shape = RoundedCornerShape(14.dp)
+                          ) {
+                              Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
+                                  Text(z.text, fontSize = (19 * scale).sp, lineHeight = (32 * scale).sp, textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth())
+                                  Spacer(Modifier.height(10.dp))
+                                  Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                      Text(z.benefit, fontSize = 12.sp, color = Color.LightGray)
+                                      Text(if (c > 0) "المتبقي: $c (اضغط للعد)" else "تمت القراءة ✓", color = if (c > 0) MaterialTheme.colorScheme.primary else Color(0xFF4CAF50), fontWeight = FontWeight.Bold)
+                                  }
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+
+          @Composable
+          fun MoreSectionScreen(theme: Int, onTheme: (Int) -> Unit, scale: Float, onScale: (Float) -> Unit, onCalc: () -> Unit) {
+              var currentPage by remember { mutableStateOf("MENU") }
+
+              val menuItems = listOf(
+                  Triple("RADIO", "إذاعات القرآن والراديو", Icons.Default.Radio),
+                  Triple("KHATMAH", "الختمة الذكية (المصلي)", Icons.Default.BookmarkAdded),
+                  Triple("HUSARY_KIDS", "مرتل الحصري للأطفال", Icons.Default.ChildCare),
+                  Triple("COMPASS", "بوصلة القبلة (الكعبة)", Icons.Default.Explore),
+                  Triple("TASBEEH", "السبحة الإلكترونية", Icons.Default.TouchApp),
+                  Triple("HADITH", "أحاديث نبوية شريفة", Icons.Default.AutoStories),
+                  Triple("PROPHETS", "قصص الأنبياء كاملة", Icons.Default.HistoryEdu),
+                  Triple("GHAZWAT", "غزوات النبي ﷺ", Icons.Default.Shield),
+                  Triple("SARAYA", "سرايا وبعوث النبي ﷺ", Icons.Default.Flag),
+                  Triple("QURAN_STORIES", "قصص القرآن الكريم", Icons.Default.MenuBook),
+                  Triple("QURAN_RULES", "أحكام التجويد والقرآن", Icons.Default.FactCheck),
+                  Triple("SETTINGS", "الإعدادات والتحديث والموقع", Icons.Default.Settings)
+              )
+
+              Column(modifier = Modifier.fillMaxSize()) {
+                  if (currentPage != "MENU") {
+                      Row(modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                          UniformButton("رجوع لقائمة المزيد") { currentPage = "MENU" }
+                          Text(menuItems.firstOrNull { it.first == currentPage }?.second ?: "", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                      }
+                  }
+
+                  when (currentPage) {
+                      "MENU" -> {
+                          LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
+                              item {
+                                  Text("أقسام إسلامية والخدمات الإضافية", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 4.dp))
+                              }
+                              items(menuItems.chunked(2)) { rowItems ->
+                                  Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                                      rowItems.forEach { (key, title, icon) ->
+                                          Card(
+                                              modifier = Modifier
+                                                  .weight(1f)
+                                                  .height(100.dp)
+                                                  .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                                                  .clickable { currentPage = key },
+                                              colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)),
+                                              shape = RoundedCornerShape(16.dp)
+                                          ) {
+                                              Column(
+                                                  modifier = Modifier.fillMaxSize().padding(10.dp),
+                                                  horizontalAlignment = Alignment.CenterHorizontally,
+                                                  verticalArrangement = Alignment.Center
+                                              ) {
+                                                  Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
+                                                  Spacer(Modifier.height(6.dp))
+                                                  Text(title, fontSize = 13.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 1, softWrap = false)
+                                              }
+                                          }
+                                      }
+                                      if (rowItems.size == 1) Spacer(Modifier.weight(1f))
+                                  }
+                              }
+                          }
+                      }
+                      "RADIO" -> RadioScreen()
+                      "KHATMAH" -> KhatmahPlannerScreen()
+                      "HUSARY_KIDS" -> HusaryKidsMuallimScreen()
+                      "COMPASS" -> CompassView()
+                      "TASBEEH" -> TasbeehView()
+                      "HADITH" -> HadithListView(IslamicRepository.HADITH_LIST, scale)
+                      "PROPHETS" -> ArticlesListView(IslamicRepository.PROPHETS_STORIES, scale)
+                      "GHAZWAT" -> ArticlesListView(IslamicRepository.GHAZWAT_LIST, scale)
+                      "SARAYA" -> ArticlesListView(IslamicRepository.SARAYA_LIST, scale)
+                      "QURAN_STORIES" -> ArticlesListView(IslamicRepository.QURAN_STORIES, scale)
+                      "QURAN_RULES" -> ArticlesListView(IslamicRepository.QURAN_RULES, scale)
+                      "SETTINGS" -> SettingsScreen(theme, onTheme, scale, onScale, onCalc)
+                  }
+              }
+          }
+
+          @Composable
+          fun KhatmahPlannerScreen() {
+              val context = LocalContext.current
+              val prefs = remember { context.getSharedPreferences("hona_prefs", Context.MODE_PRIVATE) }
+              var targetDays by remember { mutableIntStateOf(prefs.getInt("khatmah_days", 30)) }
+              var completedJuz by remember { mutableIntStateOf(prefs.getInt("khatmah_juz", 0)) }
+              val dailyPages = (604.0 / targetDays).toInt().coerceAtLeast(1)
+
+              LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
+                  item {
+                      Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(16.dp)) {
+                          Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                              Text("مخطط ختمة القرآن الكريم (ميزة المصلي)", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                              Text("اختر مدة الختمة المطلوبة لحساب وردك اليومي بدقة:", fontSize = 13.sp, color = Color.LightGray)
+                              Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                                  listOf(7 to "أسبوع", 15 to "15 يوم", 30 to "شهر", 60 to "شهران").forEach { (days, label) ->
+                                      UniformButton(label, Modifier.weight(1f), isSelected = targetDays == days) {
+                                          targetDays = days
+                                          prefs.edit().putInt("khatmah_days", days).apply()
+                                      }
+                                  }
+                              }
+                              HorizontalDivider(color = Color.Gray.copy(alpha = 0.3f))
+                              Text("📖 وردك اليومي المطلوب: $dailyPages صفحة يومياً (حوالي ${(dailyPages / 5).coerceAtLeast(1)} صفحات بعد كل صلاة)", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                              Text("نسبة الإنجاز الحالية: $completedJuz من 30 جزء (${(completedJuz * 100) / 30}%)", fontSize = 14.sp, color = MaterialTheme.colorScheme.primary)
+                              LinearProgressIndicator(
+                                  progress = { completedJuz / 30f },
+                                  modifier = Modifier.fillMaxWidth().height(10.dp),
+                                  color = MaterialTheme.colorScheme.primary
+                              )
+                              Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                  UniformButton("أتممت جزءاً (+1)", Modifier.weight(1f)) {
+                                      if (completedJuz < 30) {
+                                          completedJuz++
+                                          prefs.edit().putInt("khatmah_juz", completedJuz).apply()
+                                      }
+                                  }
+                                  UniformButton("تصفير الختمة", Modifier.weight(1f)) {
+                                      completedJuz = 0
+                                      prefs.edit().putInt("khatmah_juz", 0).apply()
+                                  }
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+
+          @Composable
+          fun HadithListView(hadiths: List<HadithItem>, scale: Float) {
+              var selectedHadithInfo by remember { mutableStateOf<HadithItem?>(null) }
+
+              if (selectedHadithInfo != null) {
+                  val h = selectedHadithInfo!!
+                  AlertDialog(
+                      onDismissRequest = { selectedHadithInfo = null },
+                      title = {
+                          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                              Text("تفاصيل الحديث الشريف", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                              IconButton(onClick = { selectedHadithInfo = null }) { Icon(Icons.Default.Close, null, tint = Color.White) }
+                          }
+                      },
+                      text = {
+                          Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                              Text("• الراوي: ${h.narrator}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                              Text("• التخريج والمصدر: ${h.source}", color = Color(0xFFFFD166), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                              HorizontalDivider(color = Color.Gray.copy(alpha = 0.3f))
+                              Text("• شرح الحديث ومعناه:\n${h.explanation}", fontSize = 14.sp, lineHeight = 22.sp)
+                              Text("• الفوائد المستنبطة:\n${h.lessons}", fontSize = 14.sp, lineHeight = 22.sp, color = Color(0xFFE0E0E0))
+                          }
+                      },
+                      confirmButton = { UniformButton("إغلاق") { selectedHadithInfo = null } },
+                      containerColor = MaterialTheme.colorScheme.surface,
+                      titleContentColor = Color.White,
+                      textContentColor = Color.White
+                  )
+              }
+
+              LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
+                  items(hadiths) { h ->
+                      Card(
+                          modifier = Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f), RoundedCornerShape(14.dp)),
+                          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)),
+                          shape = RoundedCornerShape(14.dp)
+                      ) {
+                          Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
+                              Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                  Column(modifier = Modifier.weight(1f)) {
+                                      Text(h.title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                      Text(h.source, fontSize = 12.sp, color = Color.LightGray)
+                                  }
+                                  IconButton(
+                                      onClick = { selectedHadithInfo = h },
+                                      modifier = Modifier
+                                          .size(36.dp)
+                                          .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f), CircleShape)
+                                          .border(1.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                                  ) {
+                                      Icon(Icons.Default.Info, contentDescription = "تفاصيل الحديث", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                                  }
+                              }
+                              HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.3f))
+                              Text(h.text, fontSize = (16 * scale).sp, lineHeight = (28 * scale).sp, textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth())
+                          }
+                      }
+                  }
+              }
+          }
+
+          @Composable
+          fun HusaryKidsMuallimScreen() {
+              val context = LocalContext.current
+              val currentUrl by MediaPlaybackState.currentUrl
+              val isPlaying by MediaPlaybackState.isPlaying
+
+              val kidsSurahs = listOf(
+                  1 to "سورة الفاتحة", 78 to "سورة النبأ", 79 to "سورة النازعات", 80 to "سورة عبس",
+                  81 to "سورة التكوير", 82 to "سورة الانفطار", 83 to "سورة المطففين", 84 to "سورة الانشقاق",
+                  85 to "سورة البروج", 86 to "سورة الطارق", 87 to "سورة الأعلى", 88 to "سورة الغاشية",
+                  89 to "سورة الفجر", 90 to "سورة البلد", 91 to "سورة الشمس", 92 to "سورة الليل",
+                  93 to "سورة الضحى", 94 to "سورة الشرح", 95 to "سورة التين", 96 to "سورة العلق",
+                  97 to "سورة القدر", 98 to "سورة البينة", 99 to "سورة الزلزلة", 100 to "سورة العاديات",
+                  101 to "سورة القارعة", 102 to "سورة التكاثر", 103 to "سورة العصر", 104 to "سورة الهمزة",
+                  105 to "سورة الفيل", 106 to "سورة قريش", 107 to "سورة الماعون", 108 to "سورة الكوثر",
+                  109 to "سورة الكافرون", 110 to "سورة النصر", 111 to "سورة المسد", 112 to "سورة الإخلاص",
+                  113 to "سورة الفلق", 114 to "سورة الناس"
+              )
+
+              LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
+                  item {
+                      Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(14.dp)) {
+                          Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
+                              Text("المصحف المعلم للأطفال - الشيخ محمود خليل الحصري", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                              Text("اضغط على أي سورة لتشغيلها فوراً وأنت داخل التطبيق", fontSize = 12.sp, color = Color.LightGray)
+                          }
+                      }
+                  }
+                  items(kidsSurahs) { (num, name) ->
+                      val formatted = String.format(Locale.US, "%03d", num)
+                      val url = "https://server13.mp3quran.net/husr/Muallim/$formatted.mp3"
+                      val isThisPlaying = currentUrl == url && isPlaying
+                      Card(
+                          modifier = Modifier.fillMaxWidth().clickable {
+                              if (currentUrl == url) toggleMediaService(context)
+                              else startMediaService(context, url, "$name - المصحف المعلم", "الشيخ الحصري (ترديد الأطفال)")
+                          },
+                          colors = CardDefaults.cardColors(containerColor = if (isThisPlaying) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f) else MaterialTheme.colorScheme.surface)
+                      ) {
+                          Row(modifier = Modifier.padding(14.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                              Text("$num. $name (مع ترديد الأطفال)", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                              Icon(if (isThisPlaying) Icons.Default.PauseCircleFilled else Icons.Default.PlayCircleFilled, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
+                          }
+                      }
+                  }
+              }
+          }
+
+          @Composable
+          fun TasbeehView() {
+              val context = LocalContext.current
+              val prefs = remember { context.getSharedPreferences("hona_prefs", Context.MODE_PRIVATE) }
+              var tasbeeh by remember { mutableIntStateOf(prefs.getInt("tasbeeh", 0)) }
+              Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                  Text("سُبْحَانَ اللهِ وَبِحَمْدِهِ • سُبْحَانَ اللهِ الْعَظِيمِ", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
+                  Spacer(Modifier.height(20.dp))
+                  Box(modifier = Modifier.size(190.dp).background(MaterialTheme.colorScheme.surface, CircleShape).border(4.dp, MaterialTheme.colorScheme.primary, CircleShape).clickable {
+                      tasbeeh++; prefs.edit().putInt("tasbeeh", tasbeeh).apply()
+                  }, contentAlignment = Alignment.Center) {
+                      Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                          Text("$tasbeeh", fontSize = 44.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                          Text("اضغط للتسبيح", fontSize = 13.sp, color = Color.LightGray)
+                      }
+                  }
+                  Spacer(Modifier.height(18.dp))
+                  UniformButton("تصفير العداد") { tasbeeh = 0; prefs.edit().putInt("tasbeeh", 0).apply() }
+              }
+          }
+
+          @Composable
+          fun ArticlesListView(articles: List<IslamicArticle>, scale: Float) {
+              LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
+                  items(articles) { art ->
+                      Card(
+                          modifier = Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f), RoundedCornerShape(14.dp)),
+                          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)),
+                          shape = RoundedCornerShape(14.dp)
+                      ) {
+                          Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
+                              Text(art.title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                              Text(art.subtitle, fontSize = 12.sp, color = Color.LightGray)
+                              HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.3f))
+                              Text(art.content, fontSize = (16 * scale).sp, lineHeight = (28 * scale).sp, textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth())
+                          }
+                      }
+                  }
+              }
+          }
+
+          @Composable
+          fun RadioScreen() {
+              val context = LocalContext.current
+              val currentUrl by MediaPlaybackState.currentUrl
+              val isPlaying by MediaPlaybackState.isPlaying
+              val isBuffering by MediaPlaybackState.isBuffering
+              val currentTitle by MediaPlaybackState.currentTitle
+
+              val savedOfflineCount = remember {
+                  context.filesDir.listFiles { f -> f.name.startsWith("audio_") && f.name.endsWith(".mp3") && f.length() > 15000 }?.size ?: 0
+              }
+
+              LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
+                  item {
+                      Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(16.dp)) {
+                          Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                              Text("إذاعات القرآن الكريم (مباشر + أوفلاين)", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                              Text(
+                                  if (currentTitle != null) (if (isBuffering) "جاري الاتصال ببث: $currentTitle..." else "يعمل الآن: $currentTitle")
+                                  else "اختر إذاعة مباشرة أو شغّل الراديو الأوفلاين بدون إنترنت",
+                                  fontSize = 13.sp,
+                                  color = Color.LightGray
+                              )
+                          }
+                      }
+                  }
+
+                  item {
+                      val isOfflinePlaying = currentUrl == "OFFLINE_RADIO"
+                      Card(
+                          modifier = Modifier
+                              .fillMaxWidth()
+                              .border(1.5.dp, Color(0xFF4CAF50), RoundedCornerShape(14.dp))
+                              .clickable {
+                                  if (isOfflinePlaying) toggleMediaService(context)
+                                  else startMediaService(context, "OFFLINE_RADIO", "راديو القرآن الأوفلاين", "بدون إنترنت")
+                              },
+                          colors = CardDefaults.cardColors(containerColor = if (isOfflinePlaying) Color(0xFF1B5E20) else MaterialTheme.colorScheme.surface),
+                          shape = RoundedCornerShape(14.dp)
+                      ) {
+                          Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                              Column(modifier = Modifier.weight(1f)) {
+                                  Text("📻 راديو القرآن بدون إنترنت (أوفلاين)", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF81C784))
+                                  Text("يشغّل التلاوات المحفوظة بالتتابع بدون نت ($savedOfflineCount سورة محفوظة)", fontSize = 12.sp, color = Color.LightGray)
+                              }
+                              Icon(
+                                  if (isOfflinePlaying && isPlaying) Icons.Default.PauseCircleFilled else Icons.Default.PlayCircleFilled,
+                                  null,
+                                  tint = Color(0xFF81C784),
+                                  modifier = Modifier.size(34.dp)
+                              )
+                          }
+                      }
+                  }
+
+                  items(STATIONS) { st ->
+                      val isThisStation = currentUrl == st.streamUrl
+                      Card(
+                          modifier = Modifier.fillMaxWidth().clickable {
+                              if (isThisStation) toggleMediaService(context)
+                              else startMediaService(context, st.streamUrl, st.name, st.subtitle)
+                          },
+                          colors = CardDefaults.cardColors(containerColor = if (isThisStation) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f) else MaterialTheme.colorScheme.surface),
+                          shape = RoundedCornerShape(14.dp)
+                      ) {
+                          Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                              Column(modifier = Modifier.weight(1f)) {
+                                  Text(st.name, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                  Text(st.subtitle, fontSize = 12.sp, color = Color.LightGray)
+                              }
+                              Icon(
+                                  if (isThisStation && isPlaying) Icons.Default.PauseCircleFilled else Icons.Default.PlayCircleFilled,
+                                  null,
+                                  tint = MaterialTheme.colorScheme.primary,
+                                  modifier = Modifier.size(34.dp)
+                              )
+                          }
+                      }
+                  }
+              }
+          }
+
+          @Composable
+          fun CompassView() {
+              val context = LocalContext.current
+              val qiblaAngle = remember { PrayerCalculator.getQiblaAngle(context) }
+              var azimuth by remember { mutableFloatStateOf(0f) }
+
+              DisposableEffect(Unit) {
+                  val sm = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+                  val sensor = sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR) ?: sm.getDefaultSensor(Sensor.TYPE_ORIENTATION)
+                  val listener = object : SensorEventListener {
+                      override fun onSensorChanged(e: SensorEvent?) {
+                          if (e == null) return
+                          if (e.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
+                              val rm = FloatArray(9)
+                              SensorManager.getRotationMatrixFromVector(rm, e.values)
+                              val ori = FloatArray(3)
+                              SensorManager.getOrientation(rm, ori)
+                              azimuth = ((Math.toDegrees(ori[0].toDouble()) + 360) % 360).toFloat()
+                          } else azimuth = e.values[0]
+                      }
+                      override fun onAccuracyChanged(s: Sensor?, a: Int) {}
+                  }
+                  if (sensor != null) sm.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
+                  onDispose { sm.unregisterListener(listener) }
+              }
+
+              val rot = (qiblaAngle - azimuth + 360f) % 360f
+              val primary = MaterialTheme.colorScheme.primary
+              val surface = MaterialTheme.colorScheme.surface
+
+              Column(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                  Text("بوصلة اتجاه القبلة المشرفة", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = primary)
+                  Text("زاوية الكعبة من موقعك: ${qiblaAngle.toInt()}° من الشمال", fontSize = 14.sp, color = Color.LightGray)
+                  Spacer(Modifier.height(22.dp))
+                  Box(modifier = Modifier.size(240.dp), contentAlignment = Alignment.Center) {
+                      Canvas(modifier = Modifier.fillMaxSize()) {
+                          drawCircle(color = surface)
+                          drawCircle(color = primary, style = Stroke(width = 5.dp.toPx()))
+                          drawCircle(color = primary.copy(alpha = 0.25f), radius = size.minDimension * 0.36f, style = Stroke(width = 1.5.dp.toPx()))
+
+                          rotate(degrees = rot) {
+                              val tipY = 30.dp.toPx()
+                              drawLine(color = primary, start = center, end = Offset(center.x, tipY), strokeWidth = 6.dp.toPx())
+
+                              val kSize = 26.dp.toPx()
+                              val kLeft = center.x - kSize / 2f
+                              val kTop = tipY - kSize / 2f
+                              drawRect(color = Color(0xFF111111), topLeft = Offset(kLeft, kTop), size = Size(kSize, kSize))
+                              drawRect(color = Color(0xFFFFD700), topLeft = Offset(kLeft, kTop), size = Size(kSize, kSize), style = Stroke(width = 2.dp.toPx()))
+                              drawLine(
+                                  color = Color(0xFFFFD700),
+                                  start = Offset(kLeft, kTop + kSize * 0.28f),
+                                  end = Offset(kLeft + kSize, kTop + kSize * 0.28f),
+                                  strokeWidth = 3.dp.toPx()
+                              )
+                          }
+
+                          val centerKSize = 24.dp.toPx()
+                          val cLeft = center.x - centerKSize / 2f
+                          val cTop = center.y - centerKSize / 2f
+                          drawRect(color = Color(0xFF111111), topLeft = Offset(cLeft, cTop), size = Size(centerKSize, centerKSize))
+                          drawRect(color = Color(0xFFFFD700), topLeft = Offset(cLeft, cTop), size = Size(centerKSize, centerKSize), style = Stroke(width = 2.dp.toPx()))
+                          drawLine(
+                              color = Color(0xFFFFD700),
+                              start = Offset(cLeft, cTop + centerKSize * 0.3f),
+                              end = Offset(cLeft + centerKSize, cTop + centerKSize * 0.3f),
+                              strokeWidth = 2.5.dp.toPx()
+                          )
+                      }
+                  }
+                  Spacer(Modifier.height(14.dp))
+                  Text("وجّه الهاتف حتى تشير الكعبة الذهبية للأعلى", fontSize = 13.sp, color = Color.LightGray)
+              }
+          }
+
+          @SuppressLint("MissingPermission")
+          @Composable
+          fun SettingsScreen(theme: Int, onTheme: (Int) -> Unit, scale: Float, onScale: (Float) -> Unit, onCalc: () -> Unit) {
+              val context = LocalContext.current
+              val prefs = remember { context.getSharedPreferences("hona_prefs", Context.MODE_PRIVATE) }
+              val scope = rememberCoroutineScope()
+
+              var updateCheckStatus by remember { mutableStateOf("الإصدار الحالي: v$CURRENT_APP_VERSION") }
+              var checkingUpdateNow by remember { mutableStateOf(false) }
+              var adhanUrl by remember { mutableStateOf(prefs.getString("adhan_url", ADHANS.first().second)!!) }
+
+              var autoGps by remember { mutableStateOf(prefs.getBoolean("auto_gps", true)) }
+              var selectedCity by remember { mutableStateOf(PrayerCalculator.getSavedCityName(context)) }
+
+              var salawatEnabled by remember { mutableStateOf(prefs.getBoolean("salawat_enabled", false)) }
+              var salawatInterval by remember { mutableIntStateOf(prefs.getInt("salawat_interval", 15)) }
+              var salawatVoiceChoice by remember { mutableIntStateOf(prefs.getInt("salawat_voice_choice", 1)) }
+              var salawatVol1 by remember { mutableFloatStateOf(prefs.getFloat("salawat_vol_1", 1.0f)) }
+              var salawatVol2 by remember { mutableFloatStateOf(prefs.getFloat("salawat_vol_2", 1.0f)) }
+
+              val fivePrayers = listOf(
+                  "fajr" to "الفجر",
+                  "dhuhr" to "الظهر",
+                  "asr" to "العصر",
+                  "maghrib" to "المغرب",
+                  "isha" to "العشاء"
+              )
+
+              LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
+                  item {
+                      Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(16.dp)) {
+                          Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                              Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                  Column(modifier = Modifier.weight(1f)) {
+                                      Text("التذكير الصوتي: صلِّ على محمد ﷺ", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                      Text("اختر بين الصوتين وحدد مستوى صوت كل واحد منهما", fontSize = 12.sp, color = Color.LightGray)
+                                  }
+                                  Switch(
+                                      checked = salawatEnabled,
+                                      onCheckedChange = {
+                                          salawatEnabled = it
+                                          prefs.edit().putBoolean("salawat_enabled", it).apply()
+                                          SalawatKeepAliveService.syncState(context)
+                                          if (it) triggerSalawatNow(context)
+                                      }
+                                  )
+                              }
+
+                              Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                  UniformButton("الصوت الأول (salawat)", Modifier.weight(1f), isSelected = salawatVoiceChoice == 1) {
+                                      salawatVoiceChoice = 1
+                                      prefs.edit().putInt("salawat_voice_choice", 1).apply()
+                                      triggerSalawatNow(context)
+                                  }
+                                  UniformButton("الصوت الثاني (salawt2)", Modifier.weight(1f), isSelected = salawatVoiceChoice == 2) {
+                                      salawatVoiceChoice = 2
+                                      prefs.edit().putInt("salawat_voice_choice", 2).apply()
+                                      triggerSalawatNow(context)
+                                  }
+                              }
+
+                              Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF06281E).copy(alpha = 0.5f), RoundedCornerShape(10.dp)).padding(10.dp)) {
+                                  Text("مستوى الصوت الأول: ${(salawatVol1 * 100).toInt()}%", fontSize = 13.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                  Slider(
+                                      value = salawatVol1,
+                                      onValueChange = {
+                                          salawatVol1 = it
+                                          prefs.edit().putFloat("salawat_vol_1", it).apply()
+                                      },
+                                      valueRange = 0.1f..1.0f
+                                  )
+                              }
+
+                              Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF06281E).copy(alpha = 0.5f), RoundedCornerShape(10.dp)).padding(10.dp)) {
+                                  Text("مستوى الصوت الثاني (salawt2): ${(salawatVol2 * 100).toInt()}%", fontSize = 13.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                  Slider(
+                                      value = salawatVol2,
+                                      onValueChange = {
+                                          salawatVol2 = it
+                                          prefs.edit().putFloat("salawat_vol_2", it).apply()
+                                      },
+                                      valueRange = 0.1f..1.0f
+                                  )
+                              }
+
+                              Text("التكرار كل:", fontSize = 12.sp, color = Color.LightGray)
+                              Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                                  listOf(5 to "5 د", 15 to "15 د", 30 to "30 د", 60 to "ساعة").forEach { (mins, title) ->
+                                      UniformButton(title, Modifier.weight(1f), isSelected = salawatInterval == mins) {
+                                          salawatInterval = mins
+                                          prefs.edit().putInt("salawat_interval", mins).apply()
+                                          SalawatKeepAliveService.syncState(context)
+                                          Toast.makeText(context, "تم ضبط التذكير الصامت كل $title", Toast.LENGTH_SHORT).show()
+                                      }
+                                  }
+                              }
+                              UniformButton("🔊 سماع وتجربة الصوت المختار الآن", Modifier.fillMaxWidth()) {
+                                  triggerSalawatNow(context)
+                              }
+                          }
+                      }
+                  }
+
+                  item {
+                      Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(16.dp)) {
+                          Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                              Text("تخصيص تنبيهات الصلوات الخمس", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                              Text("ملاحظة: أزرار الصوت ترفع وتخفض صوت الأذان، وزر الباور يلغي الأذان فوراً.", fontSize = 12.sp, color = Color(0xFFFFD166))
+
+                              fivePrayers.forEach { (key, name) ->
+                                  var enabled by remember { mutableStateOf(prefs.getBoolean("enable_$key", true)) }
+                                  var playSilent by remember { mutableStateOf(prefs.getBoolean("silent_$key", true)) }
+                                  var preMins by remember { mutableIntStateOf(prefs.getInt("pre_min_$key", 0)) }
+
+                                  Column(
+                                      modifier = Modifier
+                                          .fillMaxWidth()
+                                          .background(Color(0xFF06281E).copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                                          .padding(12.dp),
+                                      verticalArrangement = Arrangement.spacedBy(6.dp)
+                                  ) {
+                                      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                          Text("صلاة $name", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                          Row(verticalAlignment = Alignment.CenterVertically) {
+                                              Text("تفعيل الأذان", fontSize = 12.sp)
+                                              Spacer(Modifier.width(6.dp))
+                                              Switch(
+                                                  checked = enabled,
+                                                  onCheckedChange = {
+                                                      enabled = it
+                                                      prefs.edit().putBoolean("enable_$key", it).apply()
+                                                      AdhanScheduler.scheduleAllPrayers(context)
+                                                  }
+                                              )
+                                          }
+                                      }
+                                      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                          Text("يؤذن حتى في الوضع الصامت", fontSize = 12.sp, color = Color.LightGray)
+                                          Checkbox(
+                                              checked = playSilent,
+                                              onCheckedChange = {
+                                                  playSilent = it
+                                                  prefs.edit().putBoolean("silent_$key", it).apply()
+                                              }
+                                          )
+                                      }
+                                      Text("تنبيه قبل صلاة $name بـ:", fontSize = 12.sp, color = Color.LightGray)
+                                      Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
+                                          listOf(0 to "إيقاف", 5 to "5 د", 10 to "10 د", 15 to "15 د", 30 to "30 د").forEach { (m, label) ->
+                                              UniformButton(label, Modifier.weight(1f), isSelected = preMins == m) {
+                                                  preMins = m
+                                                  prefs.edit().putInt("pre_min_$key", m).apply()
+                                                  AdhanScheduler.scheduleAllPrayers(context)
+                                              }
+                                          }
+                                      }
+                                  }
+                              }
+                          }
+                      }
+                  }
+
+                  item {
+                      Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(16.dp)) {
+                          Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                              Text("تحديد الموقع الجغرافي للمواقيت", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                              Text("الموقع الحالي: $selectedCity", fontSize = 13.sp, color = Color.LightGray)
+                              Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                  UniformButton("تحديد أوتوماتيك (GPS)", Modifier.weight(1f), isSelected = autoGps) {
+                                      autoGps = true
+                                      prefs.edit().putBoolean("auto_gps", true).apply()
+                                      LocationServices.getFusedLocationProviderClient(context).lastLocation.addOnSuccessListener { loc ->
+                                          if (loc != null) {
+                                              PrayerCalculator.saveLocation(context, loc.latitude, loc.longitude, "موقعك الدقيق (GPS)")
+                                              selectedCity = "موقعك الدقيق (GPS)"
+                                              onCalc()
+                                              AdhanScheduler.scheduleAllPrayers(context)
+                                              Toast.makeText(context, "تم تحديث الموقع عبر GPS بنجاح", Toast.LENGTH_SHORT).show()
+                                          }
+                                      }
+                                  }
+                                  UniformButton("اختيار يدوي للمدينة", Modifier.weight(1f), isSelected = !autoGps) {
+                                      autoGps = false
+                                      prefs.edit().putBoolean("auto_gps", false).apply()
+                                  }
+                              }
+
+                              if (!autoGps) {
+                                  Text("اختر محافظتك أو مدينتك يدوياً:", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                                  IslamicRepository.EGYPT_AND_ARAB_CITIES.forEach { city ->
+                                      Row(
+                                          modifier = Modifier
+                                              .fillMaxWidth()
+                                              .clickable {
+                                                  PrayerCalculator.saveLocation(context, city.lat, city.lng, city.name)
+                                                  selectedCity = city.name
+                                                  onCalc()
+                                                  AdhanScheduler.scheduleAllPrayers(context)
+                                                  Toast.makeText(context, "تم ضبط المواقيت على: ${city.name}", Toast.LENGTH_SHORT).show()
+                                              }
+                                              .padding(vertical = 6.dp),
+                                          verticalAlignment = Alignment.CenterVertically
+                                      ) {
+                                          RadioButton(selected = selectedCity == city.name, onClick = null)
+                                          Spacer(Modifier.width(8.dp))
+                                          Text(city.name, fontSize = 14.sp)
+                                      }
+                                  }
+                              }
+                          }
+                      }
+                  }
+
+                  item {
+                      Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(16.dp)) {
+                          Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                              Text("اختيار صوت المؤذن وتجربته", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                              ADHANS.forEach { (name, u) ->
+                                  Row(
+                                      modifier = Modifier.fillMaxWidth().clickable {
+                                          adhanUrl = u
+                                          prefs.edit().putString("adhan_url", u).apply()
+                                          File(context.filesDir, "custom_adhan.mp3").delete()
+                                          Toast.makeText(context, "تم اختيار: $name", Toast.LENGTH_SHORT).show()
+                                      }.padding(vertical = 6.dp),
+                                      verticalAlignment = Alignment.CenterVertically
+                                  ) {
+                                      RadioButton(selected = adhanUrl == u, onClick = null)
+                                      Spacer(Modifier.width(8.dp))
+                                      Text(name, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                  }
+                              }
+                              Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                  UniformButton("تجربة الأذان", Modifier.weight(1f)) {
+                                      val i = Intent(context, AdhanService::class.java).apply {
+                                          putExtra("PRAYER_NAME", "التجربة")
+                                          putExtra("PRAYER_KEY", "test")
+                                      }
+                                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(i) else context.startService(i)
+                                  }
+                                  Button(
+                                      onClick = { context.startService(Intent(context, AdhanService::class.java).apply { action = "STOP_ADHAN" }) },
+                                      colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F), contentColor = Color.White),
+                                      shape = RoundedCornerShape(12.dp),
+                                      modifier = Modifier.weight(1f)
+                                  ) {
+                                      Icon(Icons.Default.StopCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                                      Spacer(Modifier.width(6.dp))
+                                      Text("إيقاف الأذان", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                                  }
+                              }
+                          }
+                      }
+                  }
+
+                  item {
+                      Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(16.dp)) {
+                          Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                              Text("إعدادات الشكل والألوان والخط", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                              Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                  UniformButton("زمردي إسلامي", Modifier.weight(1f), isSelected = theme == 0) { onTheme(0) }
+                                  UniformButton("كحلي", Modifier.weight(1f), isSelected = theme == 1) { onTheme(1) }
+                                  UniformButton("أندلسي", Modifier.weight(1f), isSelected = theme == 2) { onTheme(2) }
+                              }
+                              Text("حجم خط القرآن والأذكار:", fontSize = 14.sp, color = Color.LightGray)
+                              Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                  UniformButton("عادي", Modifier.weight(1f), isSelected = scale == 1.0f) { onScale(1.0f) }
+                                  UniformButton("كبير", Modifier.weight(1f), isSelected = scale == 1.2f) { onScale(1.2f) }
+                                  UniformButton("ضخم", Modifier.weight(1f), isSelected = scale == 1.4f) { onScale(1.4f) }
+                              }
+                          }
+                      }
+                  }
+
+                  item {
+                      Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(16.dp)) {
+                          Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                              Text("تحديث التطبيق والعمل في الخلفية", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                              Text(updateCheckStatus, fontSize = 13.sp, color = Color(0xFFFFD166), fontWeight = FontWeight.Bold)
+                              UniformButton(if (checkingUpdateNow) "جاري فحص التحديثات..." else "فحص وتحديث التطبيق", Modifier.fillMaxWidth()) {
+                                  if (checkingUpdateNow) return@UniformButton
+                                  checkingUpdateNow = true
+                                  scope.launch(Dispatchers.IO) {
+                                      var isLatest = true
+                                      var remoteVerName = CURRENT_APP_VERSION
+                                      try {
+                                          val ts = System.currentTimeMillis()
+                                          val conn = (URL("https://github.com/Alifathy2/HANA-Quran-Prayer/releases/latest/download/version.json?t=$ts").openConnection() as HttpURLConnection).apply {
+                                              instanceFollowRedirects = true
+                                              useCaches = false
+                                              setRequestProperty("Cache-Control", "no-cache")
+                                              connectTimeout = 8000
+                                          }
+                                          val obj = JSONObject(conn.inputStream.bufferedReader().readText())
+                                          val remoteCode = obj.optInt("versionCode", CURRENT_VERSION_CODE)
+                                          remoteVerName = obj.optString("versionName", CURRENT_APP_VERSION)
+                                          if (remoteCode > CURRENT_VERSION_CODE || remoteVerName != CURRENT_APP_VERSION) {
+                                              isLatest = false
+                                          }
+                                      } catch (_: Exception) {}
+
+                                      withContext(Dispatchers.Main) {
+                                          checkingUpdateNow = false
+                                          if (isLatest) {
+                                              updateCheckStatus = "✓ أنت بالفعل على آخر إصدار (v$CURRENT_APP_VERSION) ولا يوجد تحديث جديد"
+                                              Toast.makeText(context, "التطبيق على آخر إصدار بالفعل (v$CURRENT_APP_VERSION)", Toast.LENGTH_LONG).show()
+                                          } else {
+                                              updateCheckStatus = "يتوفر إصدار جديد (v$remoteVerName) - جاري التحميل..."
+                                              triggerDirectDownloadUpdate(context, "v$remoteVerName")
+                                          }
+                                      }
+                                  }
+                              }
+                              UniformButton("تفعيل حماية الأذان الدائم في الخلفية", Modifier.fillMaxWidth()) {
+                                  val pm = context.getSystemService(PowerManager::class.java)
+                                  if (!pm.isIgnoringBatteryOptimizations(context.packageName)) {
+                                      context.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}")))
+                                  } else {
+                                      Toast.makeText(context, "التطبيق محمي ويعمل بأعلى دقة في الخلفية ✓", Toast.LENGTH_SHORT).show()
+                                  }
+                              }
+                          }
+                      }
+                  }
               }
           }
 
@@ -1863,53 +2795,53 @@ jobs:
           }
           EOF
 
-      - name: Verify or Generate Persistent Keystore
-        env:
-          KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASSWORD || 'AlHana2026Secure' }}
-        run: |
-          if [ ! -f "alhana.jks" ]; then
-            keytool -genkey -v -keystore alhana.jks -keyalg RSA -keysize 2048 -validity 10000 -alias alhana_key -storepass "$KEYSTORE_PASS" -keypass "$KEYSTORE_PASS" -dname "CN=Al-Hana, OU=App, O=Hana, L=Cairo, S=Cairo, C=EG"
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add alhana.jks
-            git commit -m "Persist release keystore for seamless updates" || true
-            git push || true
-          fi
+  - name: Verify or Generate Persistent Keystore
+    env:
+      KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASSWORD || 'AlHana2026Secure' }}
+    run: |
+      if [ ! -f "alhana.jks" ]; then
+        keytool -genkey -v -keystore alhana.jks -keyalg RSA -keysize 2048 -validity 10000 -alias alhana_key -storepass "$KEYSTORE_PASS" -keypass "$KEYSTORE_PASS" -dname "CN=Al-Hana, OU=App, O=Hana, L=Cairo, S=Cairo, C=EG"
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add alhana.jks
+        git commit -m "Persist release keystore for seamless updates" || true
+        git push || true
+      fi
 
-      - name: SetupGradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.7'
+  - name: Setup Gradle
+    uses: gradle/actions/setup-gradle@v4
+    with:
+      gradle-version: '8.7'
 
-      - name: Build Signed Release APK & Play Store AAB + Version JSON
-        env:
-          KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASSWORD || 'AlHana2026Secure' }}
-        run: |
-          gradle assembleRelease bundleRelease -Pandroid.useAndroidX=true -Pandroid.enableJetifier=true --stacktrace
-          cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/alhana.quran.apk
-          cp app/build/outputs/bundle/release/app-release.aab app/build/outputs/apk/release/alhana.aab || true
-          cat << 'EOF' > app/build/outputs/apk/release/version.json
-          {"versionCode": 28, "versionName": "7.8"}
-          EOF
+  - name: Build Signed Release APK & Play Store AAB + Version JSON
+    env:
+      KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASSWORD || 'AlHana2026Secure' }}
+    run: |
+      gradle assembleRelease bundleRelease -Pandroid.useAndroidX=true -Pandroid.enableJetifier=true --stacktrace
+      cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/alhana.quran.apk
+      cp app/build/outputs/bundle/release/app-release.aab app/build/outputs/apk/release/alhana.aab || true
+      cat << 'EOF' > app/build/outputs/apk/release/version.json
+      {"versionCode": 30, "versionName": "8.0"}
+      EOF
 
-      - name: Upload Signed APK & Play Store Bundle to Artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Hona-AlQuran-APK
-          path: |
-            app/build/outputs/apk/release/alhana.quran.apk
-            app/build/outputs/apk/release/alhana.aab
-            app/build/outputs/apk/release/version.json
+  - name: Upload Signed APK & Play Store Bundle to Artifacts
+    if: always()
+    uses: actions/upload-artifact@v4
+    with:
+      name: Hona-AlQuran-APK
+      path: |
+        app/build/outputs/apk/release/alhana.quran.apk
+        app/build/outputs/apk/release/alhana.aab
+        app/build/outputs/apk/release/version.json
 
-      - name: Publish Direct OTA Release on GitHub
-        if: always()
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest
-          name: "هَنَا القُرآن - HANA EL Quran (v7.8)"
-          files: |
-            app/build/outputs/apk/release/alhana.quran.apk
-            app/build/outputs/apk/release/version.json
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  - name: Publish Direct OTA Release on GitHub
+    if: always()
+    uses: softprops/action-gh-release@v2
+    with:
+      tag_name: latest
+      name: "هَنَا القُرآن - HANA EL Quran (v8.0)"
+      files: |
+        app/build/outputs/apk/release/alhana.quran.apk
+        app/build/outputs/apk/release/version.json
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
