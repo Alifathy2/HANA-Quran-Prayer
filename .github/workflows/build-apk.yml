@@ -56,7 +56,8 @@ jobs:
           rootProject.name = "HonaAlQuran"
           include(":app")
           EOF
-
+          import androidx.compose.ui.platform.LocalLayoutDirection
+          import androidx.compose.ui.unit.LayoutDirection
           # 3. إعداد build.gradle.kts الرئيسي
           cat << 'EOF' > build.gradle.kts
           plugins {
@@ -507,7 +508,23 @@ jobs:
           # 12. محرك الصوت المباشر (AudioEngine.kt)
           cat << 'EOF' > app/src/main/java/com/hona/alquran/service/AudioEngine.kt
           package com.hona.alquran.service
-
+override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+    when (keyCode) {
+        KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN -> {
+            val am = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+            am.adjustStreamVolume(android.media.AudioManager.STREAM_ALARM, android.media.AudioManager.ADJUST_LOWER, 0)
+            am.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_LOWER, 0)
+            Toast.makeText(this, "تم تخفيض الصوت ✓", Toast.LENGTH_SHORT).show()
+            return true
+        }
+        KeyEvent.KEYCODE_POWER -> {
+            stopService(Intent(this, AdhanService::class.java).apply { action = "STOP_ADHAN" })
+            Toast.makeText(this, "تم إيقاف صوت الأذان والتنبيهات ✓", Toast.LENGTH_SHORT).show()
+            return true
+        }
+    }
+    return super.onKeyDown(keyCode, event)
+}
           import android.app.NotificationChannel
           import android.app.NotificationManager
           import android.app.PendingIntent
@@ -1148,6 +1165,8 @@ jobs:
           # 17. الواجهة الشاملة المحدثة (MainActivity.kt - الإصدار v7.3) مع الاستيرادات السليمة
           cat << 'EOF' > app/src/main/java/com/hona/alquran/MainActivity.kt
           package com.hona.alquran
+          import androidx.compose.runtime.getValue
+          import androidx.compose.runtime.setValue
 
           import android.Manifest
           import android.annotation.SuppressLint
