@@ -716,7 +716,7 @@ jobs:
               override fun onBind(intent: Intent?): IBinder? = null
           }
 
-          class BootReceiver : BroadcastReceiver() {
+          class BootReceiver : android.content.BroadcastReceiver() {
               override fun onReceive(context: Context, intent: Intent) {
                   if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == "android.intent.action.QUICKBOOT_POWERON") {
                       AdhanScheduler.scheduleAllPrayers(context)
@@ -979,7 +979,7 @@ jobs:
 
       - name: Build Signed Release APK & Play Store AAB + Version JSON
         env:
-          KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASSWORD || 'AlHana2026Secure' }}
+          KEYSTORE_PS: ${{ secrets.KEYSTORE_PASSWORD || 'AlHana2026Secure' }}
         run: |
           gradle assembleRelease bundleRelease -Pandroid.useAndroidX=true -Pandroid.enableJetifier=true --stacktrace
           cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/alhana.quran.apk
