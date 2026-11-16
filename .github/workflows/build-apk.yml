@@ -1,4 +1,4 @@
-name: Build Signed Release APK (HANA EL Quran v7.5)
+name: Build Signed Release APK (HANA EL Quran v7.7)
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Clean Old Files & Generate v7.5 Project
+      - name: Clean Old Files & Generate v7.7 Project
         run: |
           rm -rf app/src/main/java
           rm -rf app/src/main/res/layout
@@ -174,8 +174,8 @@ jobs:
                   applicationId = "alhana.quran"
                   minSdk = 24
                   targetSdk = 33
-                  versionCode = 25
-                  versionName = "7.5"
+                  versionCode = 27
+                  versionName = "7.7"
                   resourceConfigurations += setOf("ar", "en")
               }
 
@@ -272,7 +272,8 @@ jobs:
               <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
               <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+                            <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
               <uses-permission android:name="android.permission.WAKE_LOCK" />
               <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
@@ -318,7 +319,10 @@ jobs:
                   <service
                       android:name=".service.AdhanService"
                       android:enabled="true"
-                      android:exported="false" />
+                      android:exported="false"
+                      android:foregroundServiceType="mediaPlayback" />
+
+
 
                   <provider
                       android:name="androidx.core.content.FileProvider"
@@ -947,7 +951,7 @@ jobs:
                   val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
                   val prefs = context.getSharedPreferences("hona_prefs", Context.MODE_PRIVATE)
                   val enabled = prefs.getBoolean("salawat_enabled", false)
-                  val intervalMins = prefs.getInt("salawat_interval", 15).coerceAtLeast(5)
+                  val intervalMins = prefs.getInt("salawat_interval", 15).coerceAtLeast(1)
 
                   val intent = Intent(context, SalawatReceiver::class.java)
                   val pi = PendingIntent.getBroadcast(context, 555, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -956,6 +960,9 @@ jobs:
                   if (enabled) {
                       val triggerAt = System.currentTimeMillis() + (intervalMins * 60 * 1000L)
                       scheduleExact(context, am, triggerAt, pi)
+                      SalawatKeepAliveService.syncState(context)
+                  } else {
+                      SalawatKeepAliveService.syncState(context)
                   }
               }
           }
@@ -1044,6 +1051,7 @@ jobs:
                   } catch (_: Exception) {}
 
                   AdhanScheduler.scheduleSalawatReminder(context)
+                  SalawatKeepAliveService.syncState(context)
               }
           }
           EOF
@@ -1347,6 +1355,76 @@ jobs:
           }
           EOF
 
+          # =====================================================================
+          # 16-ب. خدمة الخلفية الصامتة لتذكير الصلاة على النبي ﷺ (SalawatKeepAliveService.kt)
+          # تعمل في الخلفية بالكامل بدون أي إشعار دائم مزعج وبدون عداد تنازلي،
+          # وتعتمد على AlarmManager الدقيق لتشغيل الصوت في المواعيد المحددة بدقة 100%.
+          # =====================================================================
+          cat << 'EOF' > app/src/main/java/com/hona/alquran/service/SalawatKeepAliveService.kt
+          package com.hona.alquran.service
+
+          import android.app.AlarmManager
+          import android.app.PendingIntent
+          import android.content.BroadcastReceiver
+          import android.content.Context
+          import android.content.Intent
+          import android.os.Build
+          import android.os.PowerManager
+
+          class SalawatKeepAliveService : BroadcastReceiver() {
+              companion object {
+                  fun syncState(context: Context) {
+                      val prefs = context.getSharedPreferences("hona_prefs", Context.MODE_PRIVATE)
+                      val enabled = prefs.getBoolean("salawat_enabled", false)
+                      val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                      val intent = Intent(context, SalawatKeepAliveService::class.java)
+                      val pi = PendingIntent.getBroadcast(context, 888, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+                      am.cancel(pi)
+                      if (enabled) {
+                          val intervalMins = prefs.getInt("salawat_interval", 15).coerceAtLeast(1)
+                          val triggerAt = System.currentTimeMillis() + (intervalMins * 60 * 1000L)
+                          try {
+                              val showIntent = PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+                              val clockInfo = AlarmManager.AlarmClockInfo(triggerAt, showIntent)
+                              am.setAlarmClock(clockInfo, pi)
+                          } catch (_: Exception) {
+                              try {
+                                  am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+                              } catch (_: Exception) {
+                                  am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+                              }
+                          }
+                      }
+                  }
+              }
+
+              override fun onReceive(context: Context, intent: Intent) {
+                  val prefs = context.getSharedPreferences("hona_prefs", Context.MODE_PRIVATE)
+                  val enabled = prefs.getBoolean("salawat_enabled", false)
+                  if (enabled) {
+                      try {
+                          val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+                          val wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Hana::SalawatSilentLock")
+                          wl.acquire(15000L)
+                      } catch (_: Exception) {}
+
+                      try {
+                          val si = Intent(context, AdhanService::class.java).apply { action = "PLAY_SALAWAT" }
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                              context.startForegroundService(si)
+                          } else {
+                              context.startService(si)
+                          }
+                      } catch (_: Exception) {}
+
+                      // جدولة المرة القادمة
+                      syncState(context)
+                  }
+              }
+          }
+          EOF
+
           cat << 'EOF' > app/src/main/java/com/hona/alquran/service/BootReceiver.kt
           package com.hona.alquran.service
 
@@ -1618,6 +1696,59 @@ jobs:
                           }
                       },
                       confirmButton = { UniformButton("حسناً") { infoDialogSurah = null } },
+                      containerColor = MaterialTheme.colorScheme.surface,
+                      titleContentColor = Color.White,
+                      textContentColor = Color.White
+                  )
+              }
+
+              // نافذة منبثقة ذكية (مثل نافذة التحديث) تطلب السماح بالعمل الدائم في الخلفية لسامسونج وباقي الهواتف
+              var showBgPermissionDialog by remember {
+                  val pm = context.getSystemService(PowerManager::class.java)
+                  val isIgnoring = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) pm.isIgnoringBatteryOptimizations(context.packageName) else true
+                  val dismissed = prefs.getBoolean("bg_dialog_dismissed_v76", false)
+                  mutableStateOf(!isIgnoring && !dismissed)
+              }
+
+              if (showBgPermissionDialog && availableUpdateName == null) {
+                  AlertDialog(
+                      onDismissRequest = {
+                          showBgPermissionDialog = false
+                          prefs.edit().putBoolean("bg_dialog_dismissed_v76", true).apply()
+                      },
+                      title = {
+                          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                              Text("تشغيل الأذان والتذكير في الخلفية", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                              IconButton(onClick = {
+                                  showBgPermissionDialog = false
+                                  prefs.edit().putBoolean("bg_dialog_dismissed_v76", true).apply()
+                              }) {
+                                  Icon(Icons.Default.Close, contentDescription = "إغلاق", tint = Color.White)
+                              }
+                          }
+                      },
+                      text = {
+                          Text("لكي يعمل الأذان وتذكير (صلِّ على محمد ﷺ) باستمرار على هواتف سامسونج والأندرويد حتى عند إغلاق الشاشة، اضغط (تفعيل الآن) واختر السماح.")
+                      },
+                      confirmButton = {
+                          UniformButton("تفعيل الآن ✓") {
+                              showBgPermissionDialog = false
+                              prefs.edit().putBoolean("bg_dialog_dismissed_v76", true).apply()
+                              try {
+                                  context.startActivity(Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}")))
+                              } catch (_: Exception) {
+                                  try {
+                                      context.startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                                  } catch (_: Exception) {}
+                              }
+                          }
+                      },
+                      dismissButton = {
+                          TextButton(onClick = {
+                              showBgPermissionDialog = false
+                              prefs.edit().putBoolean("bg_dialog_dismissed_v76", true).apply()
+                          }) { Text("لاحقاً", color = Color.LightGray) }
+                      },
                       containerColor = MaterialTheme.colorScheme.surface,
                       titleContentColor = Color.White,
                       textContentColor = Color.White
@@ -2340,7 +2471,11 @@ jobs:
                                           salawatEnabled = it
                                           prefs.edit().putBoolean("salawat_enabled", it).apply()
                                           AdhanScheduler.scheduleSalawatReminder(context)
-                                          if (it) triggerSalawatNow(context)
+                                          if (it) {
+                                              val si = Intent(context, SalawatKeepAliveService::class.java).apply { putExtra("RESET_TIMER", true) }
+                                              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(si) else context.startService(si)
+                                              triggerSalawatNow(context)
+                                          }
                                       }
                                   )
                               }
@@ -2392,7 +2527,11 @@ jobs:
                                           salawatInterval = mins
                                           prefs.edit().putInt("salawat_interval", mins).apply()
                                           AdhanScheduler.scheduleSalawatReminder(context)
-                                          Toast.makeText(context, "تم ضبط التذكير كل $title", Toast.LENGTH_SHORT).show()
+                                          if (salawatEnabled) {
+                                              val si = Intent(context, SalawatKeepAliveService::class.java).apply { putExtra("RESET_TIMER", true) }
+                                              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(si) else context.startService(si)
+                                          }
+                                          Toast.makeText(context, "تم ضبط التذكير المستمر كل $title", Toast.LENGTH_SHORT).show()
                                       }
                                   }
                               }
@@ -2678,8 +2817,8 @@ jobs:
           import java.net.URL
           import java.util.*
 
-          const val CURRENT_APP_VERSION = "7.5"
-          const val CURRENT_VERSION_CODE = 25
+          const val CURRENT_APP_VERSION = "7.7"
+          const val CURRENT_VERSION_CODE = 27
 
           data class SurahInfo(val number: Int, val name: String, val ayahsCount: Int)
           data class AyahWithTafsir(val numberInSurah: Int, val text: String, val tafsir: String)
@@ -2827,6 +2966,7 @@ jobs:
                   // ربط أزرار الصوت (رفع/خفض) بالتحكم في مستوى صوت الوسائط والأذان
                   volumeControlStream = AudioManager.STREAM_MUSIC
                   AdhanScheduler.scheduleAllPrayers(this)
+                  SalawatKeepAliveService.syncState(this)
                   setContent {
                       val prefs = remember { getSharedPreferences("hona_prefs", Context.MODE_PRIVATE) }
                       var theme by remember { mutableIntStateOf(prefs.getInt("theme", 0)) }
@@ -3191,7 +3331,7 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/alhana.quran.apk
           cp app/build/outputs/bundle/release/app-release.aab app/build/outputs/apk/release/alhana.aab || true
           cat << 'EOF' > app/build/outputs/apk/release/version.json
-          {"versionCode": 25, "versionName": "7.5"}
+          {"versionCode": 27, "versionName": "7.7"}
           EOF
 
       - name: Upload Signed APK & Play Store Bundle to Artifacts
@@ -3209,7 +3349,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: "هَنَا القُرآن - HANA EL Quran (v7.5)"
+          name: "هَنَا القُرآن - HANA EL Quran (v7.7)"
           files: |
             app/build/outputs/apk/release/alhana.quran.apk
             app/build/outputs/apk/release/version.json
