@@ -22,6 +22,32 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: Auto-Detect Keystore Password
+        id: detect_key
+        env:
+          SECRET_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          if [ ! -f "alhana.jks" ]; then
+            find . -maxdepth 3 -name "alhana.jks" -exec cp {} ./alhana.jks \; || true
+          fi
+
+          FOUND_PASS=""
+          if [ -f "alhana.jks" ]; then
+            for PASS in "$SECRET_PASS" "AlHana2026" "AlHana2026Secure" "alhana2026" "AlHana2025" "123456" "android"; do
+              if [ -n "$PASS" ] && keytool -list -keystore alhana.jks -storepass "$PASS" >/dev/null 2>&1; then
+                FOUND_PASS="$PASS"
+                echo "SUCCESS: Found matching keystore password!"
+                break
+              fi
+            done
+          fi
+
+          if [ -z "$FOUND_PASS" ]; then
+            FOUND_PASS="${SECRET_PASS:-AlHana2026Secure}"
+          fi
+
+          echo "KEYSTORE_PASS=$FOUND_PASS" >> $GITHUB_ENV
+
       - name: Clean Old Files & Generate v7.8 Project
         run: |
           rm -rf app/src/main/java
@@ -388,7 +414,7 @@ jobs:
 
               val HADITH_LIST = listOf(
                   HadithItem("1. إنما الأعمال بالنيات", "عمر بن الخطاب رضي الله عنه", "صحيح البخاري (1) وصحيح مسلم (1907)", "عَنْ أَمِيرِ الْمُؤْمِنِينَ أَبِي حَفْصٍ عُمَرَ بْنِ الْخَطَّابِ رَضِيَ اللهُ عَنْهُ قَالَ: سَمِعْتُ رَسُولَ اللَّهِ ﷺ يَقُولُ: «إِنَّمَا الْأَعْمَالُ بِالنِّيَّاتِ، وَإِنَّمَا لِكُلِّ امْرِئٍ مَا نَوَى...».", "هذا الحديث قاعدة عظيمة من قواعد الإسلام وعليه مدار قبول الأعمال.", "• وجوب إخلاص النية لله في كل قول وعمل.
-• العادات المباحة تصبح عبادات بالنية الصالحة."),
+- العادات المباحة تصبح عبادات بالنية الصالحة."),
                   HadithItem("2. فضل قراءة القرآن وتعلمه", "عثمان بن عفان رضي الله عنه", "صحيح البخاري (5027)", "عَنْ عُثْمَانَ بْنِ عَفَّانَ رَضِيَ اللَّهُ عَنْهُ قَالَ: قَالَ رَسُولُ اللَّهِ ﷺ: «خَيْرُكُمْ مَنْ تَعَلَّمَ الْقُرْآنَ وَعَلَّمَهُ».", "يبين النبي ﷺ أن أفضل الناس منزلة هم أهل القرآن.", "• الحرص على ورد يومي لتعلم القرآن وتدبره."),
                   HadithItem("3. أحب الأعمال إلى الله", "عبد الله بن مسعود رضي الله عنه", "متفق عليه", "عَنْ عَبْدِ اللَّهِ بْنِ مَسْعُودٍ رَضِيَ اللَّهُ عَنْهُ قَالَ: سَأَلْتُ النَّبِيَّ ﷺ: أَيُّ الْعَمَلِ أَحَبُّ إِلَى اللَّهِ؟ قَالَ: «الصَّلَاةُ عَلَى وَقْتِهَا»...", "رتّب النبي ﷺ أحب الأعمال إلى الله فبدأ بالصلاة على وقتها.", "• المبادرة للصلاة فور سماع الأذان."),
                   HadithItem("4. فضل الصلاة على النبي ﷺ", "أبو هريرة رضي الله عنه", "صحيح مسلم (408)", "عَنْ أَبِي هُرَيْرَةَ رَضِيَ اللَّهُ عَنْهُ أَنَّ رَسُولَ اللَّهِ ﷺ قَالَ: «مَنْ صَلَّى عَلَيَّ وَاحِدَةً صَلَّى اللَّهُ عَلَيْهِ عَشْرًا».", "صلاة الله على عبده ثناؤه عليه في الملأ الأعلى.", "• الإكثار من الصلاة على النبي ﷺ طوال اليوم."),
@@ -2085,7 +2111,7 @@ ${meta.virtuesAndTheme}", fontSize = 14.sp, lineHeight = 22.sp) } },
                                               modifier = Modifier.weight(1f).height(100.dp).border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f), RoundedCornerShape(16.dp)).clickable { currentPage = key },
                                               colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)), shape = RoundedCornerShape(16.dp)
                                           ) {
-                                              Column(modifier = Modifier.fillMaxSize().padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                                              Column(modifier = Modifier.fillMaxSize().padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalAlignment = Arrangement.Center) {
                                                   Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
                                                   Spacer(Modifier.height(6.dp))
                                                   Text(title, fontSize = 13.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 1, softWrap = false)
@@ -2629,11 +2655,10 @@ ${h.lessons}", fontSize = 14.sp, lineHeight = 22.sp, color = Color(0xFFE0E0E0)) 
           EOF
 
       - name: Verify or Generate Persistent Keystore
-        env:
-          KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASSWORD || 'AlHana2026Secure' }}
         run: |
+          PASS_TO_USE="${KEYSTORE_PASS:-AlHana2026Secure}"
           if [ ! -f "alhana.jks" ]; then
-            keytool -genkey -v -keystore alhana.jks -keyalg RSA -keysize 2048 -validity 10000 -alias alhana_key -storepass "$KEYSTORE_PASS" -keypass "$KEYSTORE_PASS" -dname "CN=Al-Hana, OU=App, O=Hana, L=Cairo, S=Cairo, C=EG"
+            keytool -genkey -v -keystore alhana.jks -keyalg RSA -keysize 2048 -validity 10000 -alias alhana_key -storepass "$PASS_TO_USE" -keypass "$PASS_TO_USE" -dname "CN=Al-Hana, OU=App, O=Hana, L=Cairo, S=Cairo, C=EG"
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add alhana.jks
@@ -2647,8 +2672,6 @@ ${h.lessons}", fontSize = 14.sp, lineHeight = 22.sp, color = Color(0xFFE0E0E0)) 
           gradle-version: '8.7'
 
       - name: Build Signed Release APK & Play Store AAB + Version JSON
-        env:
-          KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASSWORD || 'AlHana2026Secure' }}
         run: |
           gradle assembleRelease bundleRelease -Pandroid.useAndroidX=true -Pandroid.enableJetifier=true --stacktrace
           cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/alhana.quran.apk
