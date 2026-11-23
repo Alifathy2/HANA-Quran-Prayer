@@ -4,6 +4,11 @@ on:
   push:
     branches: [ "main", "master" ]
   workflow_dispatch:
+    inputs:
+      reset_keystore:
+        description: 'DANGER: delete alhana.jks and create a NEW one (old installs must be uninstalled first)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -22,31 +27,69 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Auto-Detect Keystore Password
+      - name: Detect Keystore Password, Alias and Key Password
         id: detect_key
         env:
           SECRET_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          RESET_KEYSTORE: ${{ github.event.inputs.reset_keystore }}
         run: |
+          if [ "$RESET_KEYSTORE" = "true" ]; then
+            echo "Reset requested: removing old keystore"
+            find . -maxdepth 3 -name "alhana.jks" -delete || true
+          fi
+
           if [ ! -f "alhana.jks" ]; then
             find . -maxdepth 3 -name "alhana.jks" -exec cp {} ./alhana.jks \; || true
           fi
 
+          CANDIDATES=("$SECRET_PASS" "AlHana2026Secure" "AlHana2026" "alhana2026" "AlHana2025" "123456" "android")
           FOUND_PASS=""
+          FOUND_ALIAS="alhana_key"
+          FOUND_KEYPASS=""
+
           if [ -f "alhana.jks" ]; then
-            for PASS in "$SECRET_PASS" "AlHana2026" "AlHana2026Secure" "alhana2026" "AlHana2025" "123456" "android"; do
+            for PASS in "${CANDIDATES[@]}"; do
               if [ -n "$PASS" ] && keytool -list -keystore alhana.jks -storepass "$PASS" >/dev/null 2>&1; then
                 FOUND_PASS="$PASS"
-                echo "SUCCESS: Found matching keystore password!"
                 break
               fi
             done
-          fi
 
-          if [ -z "$FOUND_PASS" ]; then
+            if [ -z "$FOUND_PASS" ]; then
+              echo "::error::alhana.jks exists in the repo but its password is not KEYSTORE_PASSWORD (nor any known default)."
+              echo "::error::Fix: set the repo secret KEYSTORE_PASSWORD to the real password of alhana.jks."
+              echo "::error::If the password is lost: run this workflow manually with reset_keystore = true (this creates a NEW signing key, so the app must be uninstalled once before updating)."
+              exit 1
+            fi
+
+            DETECTED_ALIAS=$(keytool -list -keystore alhana.jks -storepass "$FOUND_PASS" 2>/dev/null | grep -i "PrivateKeyEntry" | head -1 | cut -d, -f1)
+            if [ -n "$DETECTED_ALIAS" ]; then FOUND_ALIAS="$DETECTED_ALIAS"; fi
+
+            for KP in "$FOUND_PASS" "${CANDIDATES[@]}"; do
+              [ -n "$KP" ] || continue
+              cp alhana.jks /tmp/chk.jks
+              if keytool -keypasswd -alias "$FOUND_ALIAS" -keypass "$KP" -new "$KP" -keystore /tmp/chk.jks -storepass "$FOUND_PASS" >/dev/null 2>&1; then
+                FOUND_KEYPASS="$KP"
+                break
+              fi
+            done
+            rm -f /tmp/chk.jks
+            if [ -z "$FOUND_KEYPASS" ]; then
+              echo "::warning::Could not verify the key password separately; assuming it equals the keystore password."
+              FOUND_KEYPASS="$FOUND_PASS"
+            fi
+            echo "Keystore OK. Alias: $FOUND_ALIAS"
+          else
             FOUND_PASS="${SECRET_PASS:-AlHana2026Secure}"
+            FOUND_KEYPASS="$FOUND_PASS"
+            echo "No keystore found: a new one will be generated."
           fi
 
+          echo "::add-mask::$FOUND_PASS"
+          echo "::add-mask::$FOUND_KEYPASS"
           echo "KEYSTORE_PASS=$FOUND_PASS" >> $GITHUB_ENV
+          echo "KEY_ALIAS=$FOUND_ALIAS" >> $GITHUB_ENV
+          echo "KEY_PASS=$FOUND_KEYPASS" >> $GITHUB_ENV
 
       - name: Clean Old Files & Generate v7.8 Project
         run: |
@@ -206,8 +249,8 @@ jobs:
                   create("release") {
                       storeFile = file("../alhana.jks")
                       storePassword = System.getenv("KEYSTORE_PASS") ?: "AlHana2026Secure"
-                      keyAlias = "alhana_key"
-                      keyPassword = System.getenv("KEYSTORE_PASS") ?: "AlHana2026Secure"
+                      keyAlias = System.getenv("KEY_ALIAS") ?: "alhana_key"
+                      keyPassword = System.getenv("KEY_PASS") ?: System.getenv("KEYSTORE_PASS") ?: "AlHana2026Secure"
                       enableV1Signing = true
                       enableV2Signing = true
                       enableV3Signing = true
