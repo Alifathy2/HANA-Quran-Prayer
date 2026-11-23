@@ -413,8 +413,7 @@ jobs:
               }
 
               val HADITH_LIST = listOf(
-                  HadithItem("1. إنما الأعمال بالنيات", "عمر بن الخطاب رضي الله عنه", "صحيح البخاري (1) وصحيح مسلم (1907)", "عَنْ أَمِيرِ الْمُؤْمِنِينَ أَبِي حَفْصٍ عُمَرَ بْنِ الْخَطَّابِ رَضِيَ اللهُ عَنْهُ قَالَ: سَمِعْتُ رَسُولَ اللَّهِ ﷺ يَقُولُ: «إِنَّمَا الْأَعْمَالُ بِالنِّيَّاتِ، وَإِنَّمَا لِكُلِّ امْرِئٍ مَا نَوَى...».", "هذا الحديث قاعدة عظيمة من قواعد الإسلام وعليه مدار قبول الأعمال.", "• وجوب إخلاص النية لله في كل قول وعمل.
-            - العادات المباحة تصبح عبادات بالنية الصالحة."),
+                  HadithItem("1. إنما الأعمال بالنيات", "عمر بن الخطاب رضي الله عنه", "صحيح البخاري (1) وصحيح مسلم (1907)", "عَنْ أَمِيرِ الْمُؤْمِنِينَ أَبِي حَفْصٍ عُمَرَ بْنِ الْخَطَّابِ رَضِيَ اللهُ عَنْهُ قَالَ: سَمِعْتُ رَسُولَ اللَّهِ ﷺ يَقُولُ: «إِنَّمَا الْأَعْمَالُ بِالنِّيَّاتِ، وَإِنَّمَا لِكُلِّ امْرِئٍ مَا نَوَى...».", "هذا الحديث قاعدة عظيمة من قواعد الإسلام وعليه مدار قبول الأعمال.", "• وجوب إخلاص النية لله في كل قول وعمل.\n- العادات المباحة تصبح عبادات بالنية الصالحة."),
                   HadithItem("2. فضل قراءة القرآن وتعلمه", "عثمان بن عفان رضي الله عنه", "صحيح البخاري (5027)", "عَنْ عُثْمَانَ بْنِ عَفَّانَ رَضِيَ اللَّهُ عَنْهُ قَالَ: قَالَ رَسُولُ اللَّهِ ﷺ: «خَيْرُكُمْ مَنْ تَعَلَّمَ الْقُرْآنَ وَعَلَّمَهُ».", "يبين النبي ﷺ أن أفضل الناس منزلة هم أهل القرآن.", "• الحرص على ورد يومي لتعلم القرآن وتدبره."),
                   HadithItem("3. أحب الأعمال إلى الله", "عبد الله بن مسعود رضي الله عنه", "متفق عليه", "عَنْ عَبْدِ اللَّهِ بْنِ مَسْعُودٍ رَضِيَ اللَّهُ عَنْهُ قَالَ: سَأَلْتُ النَّبِيَّ ﷺ: أَيُّ الْعَمَلِ أَحَبُّ إِلَى اللَّهِ؟ قَالَ: «الصَّلَاةُ عَلَى وَقْتِهَا»...", "رتّب النبي ﷺ أحب الأعمال إلى الله فبدأ بالصلاة على وقتها.", "• المبادرة للصلاة فور سماع الأذان."),
                   HadithItem("4. فضل الصلاة على النبي ﷺ", "أبو هريرة رضي الله عنه", "صحيح مسلم (408)", "عَنْ أَبِي هُرَيْرَةَ رَضِيَ اللَّهُ عَنْهُ أَنَّ رَسُولَ اللَّهِ ﷺ قَالَ: «مَنْ صَلَّى عَلَيَّ وَاحِدَةً صَلَّى اللَّهُ عَلَيْهِ عَشْرًا».", "صلاة الله على عبده ثناؤه عليه في الملأ الأعلى.", "• الإكثار من الصلاة على النبي ﷺ طوال اليوم."),
@@ -1917,9 +1916,7 @@ jobs:
                   AlertDialog(
                       onDismissRequest = { infoDialogSurah = null },
                       title = { Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("معلومات ${s.name}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold); IconButton(onClick = { infoDialogSurah = null }) { Icon(Icons.Default.Close, null, tint = Color.White) } } },
-                      text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { Text("• التصنيف وعدد الآيات: ${meta.revelationTypeAr}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold); Text("• سبب النزول:
-${meta.reasonOfRevelation}", fontSize = 14.sp, lineHeight = 22.sp); Text("• فضل السورة:
-${meta.virtuesAndTheme}", fontSize = 14.sp, lineHeight = 22.sp) } },
+                      text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { Text("• التصنيف وعدد الآيات: ${meta.revelationTypeAr}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold); Text("• سبب النزول:\n${meta.reasonOfRevelation}", fontSize = 14.sp, lineHeight = 22.sp); Text("• فضل السورة:\n${meta.virtuesAndTheme}", fontSize = 14.sp, lineHeight = 22.sp) } },
                       confirmButton = { UniformButton("حسناً") { infoDialogSurah = null } },
                       containerColor = MaterialTheme.colorScheme.surface, titleContentColor = Color.White, textContentColor = Color.White
                   )
@@ -2111,7 +2108,7 @@ ${meta.virtuesAndTheme}", fontSize = 14.sp, lineHeight = 22.sp) } },
                                               modifier = Modifier.weight(1f).height(100.dp).border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f), RoundedCornerShape(16.dp)).clickable { currentPage = key },
                                               colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)), shape = RoundedCornerShape(16.dp)
                                           ) {
-                                              Column(modifier = Modifier.fillMaxSize().padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalAlignment = Arrangement.Center) {
+                                              Column(modifier = Modifier.fillMaxSize().padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                                                   Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
                                                   Spacer(Modifier.height(6.dp))
                                                   Text(title, fontSize = 13.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 1, softWrap = false)
@@ -2181,9 +2178,7 @@ ${meta.virtuesAndTheme}", fontSize = 14.sp, lineHeight = 22.sp) } },
                   AlertDialog(
                       onDismissRequest = { selectedHadithInfo = null },
                       title = { Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("تفاصيل الحديث الشريف", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = 18.sp); IconButton(onClick = { selectedHadithInfo = null }) { Icon(Icons.Default.Close, null, tint = Color.White) } } },
-                      text = { Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) { Text("• الراوي: ${h.narrator}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = 14.sp); Text("• التخريج والمصدر: ${h.source}", color = Color(0xFFFFD166), fontWeight = FontWeight.Bold, fontSize = 13.sp); HorizontalDivider(color = Color.Gray.copy(alpha = 0.3f)); Text("• شرح الحديث ومعناه:
-${h.explanation}", fontSize = 14.sp, lineHeight = 22.sp); Text("• الفوائد المستنبطة:
-${h.lessons}", fontSize = 14.sp, lineHeight = 22.sp, color = Color(0xFFE0E0E0)) } },
+                      text = { Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) { Text("• الراوي: ${h.narrator}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = 14.sp); Text("• التخريج والمصدر: ${h.source}", color = Color(0xFFFFD166), fontWeight = FontWeight.Bold, fontSize = 13.sp); HorizontalDivider(color = Color.Gray.copy(alpha = 0.3f)); Text("• شرح الحديث ومعناه:\n${h.explanation}", fontSize = 14.sp, lineHeight = 22.sp); Text("• الفوائد المستنبطة:\n${h.lessons}", fontSize = 14.sp, lineHeight = 22.sp, color = Color(0xFFE0E0E0)) } },
                       confirmButton = { UniformButton("إغلاق") { selectedHadithInfo = null } },
                       containerColor = MaterialTheme.colorScheme.surface, titleContentColor = Color.White, textContentColor = Color.White
                   )
@@ -2624,7 +2619,7 @@ ${h.lessons}", fontSize = 14.sp, lineHeight = 22.sp, color = Color(0xFFE0E0E0)) 
                                           val obj = JSONObject(conn.inputStream.bufferedReader().readText())
                                           val remoteCode = obj.optInt("versionCode", CURRENT_VERSION_CODE)
                                           remoteVerName = obj.optString("versionName", CURRENT_APP_VERSION)
-                                          if (remoteCode > CURRENT_VERSION_CODE || remoteName != CURRENT_APP_VERSION) { isLatest = false }
+                                          if (remoteCode > CURRENT_VERSION_CODE || remoteVerName != CURRENT_APP_VERSION) { isLatest = false }
                                       } catch (_: Exception) {}
 
                                       withContext(Dispatchers.Main) {
@@ -2691,7 +2686,7 @@ ${h.lessons}", fontSize = 14.sp, lineHeight = 22.sp, color = Color(0xFFE0E0E0)) 
             app/build/outputs/apk/release/version.json
 
       - name: Publish Direct OTA Release on GitHub
-        if: always()
+        if: success()
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
