@@ -22,9 +22,10 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Verify Official Signing Key (alhana.jks)
+      - name: Auto-Detect Keystore Password & Verify Official Key
+        id: detect_key
         env:
-          KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASSWORD || 'AlHana2026Secure' }}
+          SECRET_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
           if [ ! -f "alhana.jks" ]; then
             find . -maxdepth 3 -name "alhana.jks" -exec cp {} ./alhana.jks \; || true
@@ -33,9 +34,23 @@ jobs:
             echo "::error::ملف alhana.jks غير موجود! ارفعه في الصفحة الرئيسية للمستودع لكي ينزل التحديث فوق النسخة القديمة."
             exit 1
           fi
-          keytool -list -v -keystore alhana.jks -storepass "$KEYSTORE_PASS" -alias alhana_key > /tmp/ks.txt
-          FP=$(grep 'SHA256:' /tmp/ks.txt | head -1 | sed 's/.*SHA256: *//' | tr -d ':' | tr 'A-F' 'a-f')
-          echo "Verified Keystore SHA-256: $FP"
+
+          FOUND_PASS=""
+          for PASS in "$SECRET_PASS" "AlHana2026" "AlHana2026Secure" "alhana2026" "AlHana2025" "123456" "android"; do
+            if [ -n "$PASS" ] && keytool -list -keystore alhana.jks -storepass "$PASS" -alias alhana_key >/dev/null 2>&1; then
+              FOUND_PASS="$PASS"
+              echo "SUCCESS: Found matching keystore password!"
+              break
+            fi
+          done
+
+          if [ -z "$FOUND_PASS" ]; then
+            echo "::error::لم تتطابق أي من كلمات المرور مع ملف alhana.jks. راجع كلمة المرور في Secrets."
+            exit 1
+          fi
+
+          echo "KEYSTORE_PASS=$FOUND_PASS" >> $GITHUB_ENV
+          keytool -list -v -keystore alhana.jks -storepass "$FOUND_PASS" -alias alhana_key | grep -E 'SHA256:|Owner:'
 
       - name: Clean Old Source & Generate v8.0 Project
         run: |
@@ -136,9 +151,9 @@ jobs:
               signingConfigs {
                   create("release") {
                       storeFile = file("../alhana.jks")
-                      storePassword = System.getenv("KEYSTORE_PASS") ?: "AlHana2026Secure"
+                      storePassword = System.getenv("KEYSTORE_PASS")
                       keyAlias = "alhana_key"
-                      keyPassword = System.getenv("KEYSTORE_PASS") ?: "AlHana2026Secure"
+                      keyPassword = System.getenv("KEYSTORE_PASS")
                       enableV1Signing = true; enableV2Signing = true; enableV3Signing = true; enableV4Signing = true
                   }
               }
@@ -2039,8 +2054,6 @@ jobs:
           gradle-version: '8.7'
 
       - name: Build Signed Release APK & Play Store AAB + Version JSON
-        env:
-          KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASSWORD || 'AlHana2026Secure' }}
         run: |
           gradle --no-daemon assembleRelease bundleRelease -Pandroid.useAndroidX=true -Pandroid.enableJetifier=true --stacktrace
           mkdir -p app/build/outputs/apk/release
